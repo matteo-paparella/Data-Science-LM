@@ -1,0 +1,3267 @@
+---
+title: "DATA SCIENCE LAB"
+author: "Francesco Leuce matr. , Matteo Paparella matr. 812561, Gabriele Zottola matr. "
+date: "22/5/2020"
+output: html_document
+---
+1. individuare bene obiettivi e bisogni dei clienti, segmentandoli opportunamente
+2. individuare le caratteristiche salienti dei prodotti d’investimento
+3. attuare il corretto abbinamento: cliente ↔ investmenti
+4. monitorare e correggere eventuali anomalie e disallineamenti
+
+--------------------------------------------------------------------------------------------------
+
+Che cosa si va cercando?
+1. Visione d’insieme 
+2. Fattispecie tipiche, ricorrenze 
+3. Similarità/dissimilarità tra clienti (CLUSTERING) 
+4. Strutture “nascoste” nei dati, e.g. relazioni
+5. Importanza relative dei clienti (ranking)
+6. Segmentazione dei clienti – difendibile e comprensibile
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(dplyr)
+require(igraph)
+require(clustertend)
+library(factoextra)
+library(FactoMineR)
+
+#Carichiamo il dataset:
+d <- read.csv(paste0("/Users/matteo/Desktop/DATA SCIENCE/Data Science Lab/PROGETTO/DatasetClientClustering.csv"), sep=",")
+#Mostriamo le prime righe del dataset:
+head(d)
+```
+
+```{r}
+library(carData)
+#selezioniamo solamente le colonne del dataset che sono di nostro interesse ma che siano numeriche, essendo presenti delle colonne di valori mancanti:
+d_solo_numerico <- subset(d,select=c(RiskPropension, ClientInvestmentHorizon, ClientKnowledgeExperience, ClientPotentialIndex,IncomeHighLow, Sex, AuM, Age, IncomeNeed, LongTermCareNeed, ProtectionNeed, PensionNeed, InheritanceIndex, PanicMood, ClientDateStart, NoTrustInBanks))
+
+#creiamo il dataset solamente con le variabili legate al cliente:
+dataset_individuale <- subset(d,select=c(	ClientID, RiskPropension, ClientInvestmentHorizon, ClientKnowledgeExperience, ClientPotentialIndex,IncomeHighLow, Sex, AuM, Age, IncomeNeed, LongTermCareNeed, ProtectionNeed, PensionNeed, InheritanceIndex, PanicMood, ClientDateStart, NoTrustInBanks, Prov))
+
+head(dataset_individuale)
+summary(dataset_individuale)
+
+#selezioniamo del dataset originale, solamente le colonne di nostro interesse, eliminando le colonne di valori mancanti presenti nel dataset:
+d_completo <- subset(d, select = c(ClientID, RiskPropension, ClientInvestmentHorizon, ClientKnowledgeExperience, ClientPotentialIndex,IncomeHighLow, Sex, AuM, Age, IncomeNeed, LongTermCareNeed, ProtectionNeed, PensionNeed, InheritanceIndex, PanicMood, ClientDateStart, NoTrustInBanks, Prov, PortfolioRisk, PortfolioHorizon, BondInvestments,EquityInvestments, MoneyMarketInvestments, OtherInvestments, Cash))
+```
+
+```{r pressure}
+#Andiamo a selezionare solamente le variabili che appartengono al portfolio del cliente:
+dataset_portfolio <- subset(d, select = c(PortfolioRisk, PortfolioHorizon, BondInvestments,EquityInvestments, MoneyMarketInvestments, OtherInvestments, Cash))
+summary(dataset_portfolio)
+#Selezioniamo le variabili numeriche, dalle quali andiamo ad eseguire un boxplot e barplot per osservare le distribuzioni ed i valori:
+variabili.numeriche <- c("PortfolioRisk", "PortfolioHorizon", "BondInvestments","EquityInvestments", "MoneyMarketInvestments", "OtherInvestments", "Cash")
+for(i in variabili.numeriche){hist(d[,i], main=i)}
+for(i in variabili.numeriche){boxplot(d[,i], main=i)}
+#tramite boxpplot e barplot ci facciamo un'idea degli eventuali outliers e delle distribuzioni delle variabili:
+```
+
+```{r}
+#Andiamo ad osservare le correlazioni tra le variabili del dataset_portfolio e andiamo a plottarle:
+plot(dataset_portfolio)
+data.frame(cor(dataset_portfolio))
+```
+
+```{r}
+#Andiamo a suddividere in piccoli range per capire le distribuzioni delle singole variabili per capire come si distribuiscono come valori:
+#rischio di portfolio 
+length(which(dataset_portfolio$PortfolioRisk>=0 & dataset_portfolio$PortfolioRisk<=0.25))
+length(which(dataset_portfolio$PortfolioRisk>0.25 & dataset_portfolio$PortfolioRisk<=0.5))
+length(which(dataset_portfolio$PortfolioRisk>0.5 & dataset_portfolio$PortfolioRisk<=0.75))
+length(which(dataset_portfolio$PortfolioRisk>0.75))
+#4981
+#11
+#4
+#4
+#Osserviamo che la maggior parte dei rischio di portfolio si concentra in un rischio piuttosto basso, se non irrisorio. Consideriamo il valore sotto lo 0,25 pari a 4981, che sarebbe un portfolio con rischio basso e quindi scelta conservativa. Osserviamo 4 soli clienti con una propensione al rischio piuttosto elevata.
+#portfolio horizon
+length(which(dataset_portfolio$PortfolioHorizon>=0.5 & dataset_portfolio$PortfolioHorizon<=9.95))
+length(which(dataset_portfolio$PortfolioHorizon>9.95 & dataset_portfolio$PortfolioHorizon<=19.915))
+length(which(dataset_portfolio$PortfolioHorizon>19.915 & dataset_portfolio$PortfolioHorizon<=29.865))
+length(which(dataset_portfolio$PortfolioHorizon>29.865))
+#4986
+#10
+#2
+#2
+#Osserviamo che per l'orizzonte di portfolio, la maggior parte dei clienti presentano un PortfolioHorizon compreso tra 0.00 e 0.20
+#bondinvestment 
+length(which(dataset_portfolio$BondInvestments>=0 & dataset_portfolio$BondInvestments<=0.25))
+length(which(dataset_portfolio$BondInvestments>0.25 & dataset_portfolio$BondInvestments<=0.5))
+length(which(dataset_portfolio$BondInvestments>0.5 & dataset_portfolio$BondInvestments<=0.75))
+length(which(dataset_portfolio$BondInvestments>0.75))
+#965
+#1282
+#1829
+#924
+#Osservando i range dei BondInvestments, notiamo che vi è una distribuzione di investimento nei bond abbastanza eterogenea, in particolare con molti clienti che investono nel range 0.5 e 0.75
+#equitiinvestment 
+length(which(dataset_portfolio$EquityInvestments>=0 & dataset_portfolio$EquityInvestments<=0.25))
+length(which(dataset_portfolio$EquityInvestments>0.25 & dataset_portfolio$EquityInvestments<=0.5))
+length(which(dataset_portfolio$EquityInvestments>0.5 & dataset_portfolio$EquityInvestments<=0.75))
+length(which(dataset_portfolio$EquityInvestments>0.75))
+#2956
+#1553
+#396
+#95
+#Osservando la distribuzione dell'EquityInvestments, possiamo notare che più del 50% dei clienti presentano un investimento in equity nel range 0.00 - 0.25.
+#moneymarket investment
+length(which(dataset_portfolio$MoneyMarketInvestments>=0 & dataset_portfolio$MoneyMarketInvestments<=0.25))
+length(which(dataset_portfolio$MoneyMarketInvestments>0.25 & dataset_portfolio$MoneyMarketInvestments<=0.5))
+length(which(dataset_portfolio$MoneyMarketInvestments>0.5 & dataset_portfolio$MoneyMarketInvestments<=0.75))
+length(which(dataset_portfolio$MoneyMarketInvestments>0.75))
+#4880
+#72
+#23
+#25
+#Per quanto riguarda il MoneyMarketInvestments possiamo notare che la maggior parte dei clienti rientra nel range di 0.00 - 0.25:
+#otherinvestment
+length(which(dataset_portfolio$OtherInvestments>=0 & dataset_portfolio$OtherInvestments<=0.25))
+length(which(dataset_portfolio$OtherInvestments>0.25 & dataset_portfolio$OtherInvestments<=0.5))
+length(which(dataset_portfolio$OtherInvestments>0.5 & dataset_portfolio$MoneyMarketInvestments<=0.75))
+length(which(dataset_portfolio$OtherInvestments>0.75))
+#4863
+#105
+#32
+#12
+#Per quanto riguarda OtherInvestments possiamo considerare che la maggior parte dei clienti, sopra il 90%, è presente nel range 0.00 - 0.25 
+#cash
+length(which(dataset_portfolio$OtherInvestments>=0 & dataset_portfolio$OtherInvestments<=0.25))
+length(which(dataset_portfolio$OtherInvestments>0.25 & dataset_portfolio$OtherInvestments<=0.5))
+length(which(dataset_portfolio$OtherInvestments>0.5 & dataset_portfolio$OtherInvestments<=0.75))
+length(which(dataset_portfolio$OtherInvestments>0.75))
+#4863
+#105
+#20
+#12
+#Psserva
+```
+
+```{r}
+#ANALIZZIAMO ORA LE VARIABILI LEGATE ALLE INFORMAZIONI DEL CLIENTE:
+#creiamo il dataset legato alle informazioni personali del cliente. Abbiamo inserito tutte le variabili che sono legate ad informazioni sul cliente a livello personale, senza includere ovviamente informazioni sul portafolio.
+dataset_info_clienti <- subset(d, select = c(RiskPropension, ClientInvestmentHorizon, ClientKnowledgeExperience, ClientPotentialIndex, IncomeHighLow, Sex, AuM, Age,Prov, IncomeNeed, LongTermCareNeed, ProtectionNeed, PensionNeed, InheritanceIndex, PanicMood, ClientDateStart, NoTrustInBanks))
+summary(dataset_info_clienti)
+#Selezioniamo le variabili numeriche, dalle quali andiamo ad eseguire un boxplot e barplot per osservare le distribuzioni ed i valori:
+variabili.numeriche.clienti.info <- c("RiskPropension", "ClientInvestmentHorizon", "ClientKnowledgeExperience","ClientPotentialIndex", "IncomeHighLow", "Sex", "AuM", "Age", "NoTrustInBanks", "IncomeNeed", "LongTermCareNeed", "ProtectionNeed", "PensionNeed", "InheritanceIndex", "PanicMood")
+#Vado a vedere un instogramma per variabili per vedere come si distribuiscono le variabili:
+for(t in variabili.numeriche.clienti.info){hist(d[,t], main=t)}
+#vado a creare un boxplot per ogni variabile, in modo tale da vedere graficamente le statistiche ed eventuali outliers:
+for(i in variabili.numeriche.clienti.info){boxplot(d[,i], main=i)}
+```
+
+```{r}
+#Andiamo a vedere le correlazioni a livello grafico:
+plot(dataset_info_clienti)
+```
+
+```{r}
+#Propensione del rischio "RiskPropension"
+#Osserviamo della RiskPropension che la maggior parte dei clienti ha una propensione al rischio compresa tra 0.25 - 0.75, con una leggera maggioranza oltre il 50% nel range 0.25-0.50
+length(which(dataset_info_clienti$RiskPropension>=0 & dataset_info_clienti$RiskPropension<=0.25))
+length(which(dataset_info_clienti$RiskPropension>0.25 & dataset_info_clienti$RiskPropension<=0.5))
+length(which(dataset_info_clienti$RiskPropension>0.5 & dataset_info_clienti$RiskPropension<=0.75))
+length(which(dataset_info_clienti$RiskPropension>0.75))
+#61
+#2780
+#2044
+#115
+#ClientInvestmentHorizon, che sarebbe l'orizzonte di investimento del cliente:
+#Osservando il ClientInvestmentHorizon possiamo osservare che la maggioranza dei clienti ha un range compreso tra 0.00 - 0.25
+length(which(dataset_info_clienti$ClientInvestmentHorizon>=0 & dataset_info_clienti$ClientInvestmentHorizon<=20))
+length(which(dataset_info_clienti$ClientInvestmentHorizon>20 & dataset_info_clienti$ClientInvestmentHorizon<=40))
+length(which(dataset_info_clienti$ClientInvestmentHorizon>40 & dataset_info_clienti$ClientInvestmentHorizon<=60))
+length(which(dataset_info_clienti$PortfolioRisk>60))
+#4281
+#647
+#70
+#0 
+#ClientKnowledgeExperience, che rappresenta l'indice di cultura finanziaria dei clienti:
+#la maggior parte dei clienti ha un un valore di ClientKnowledgeExperience maggiore di 0.25, con una maggioranza superiore del 50% compreso tra 0.50 - 0.75
+length(which(dataset_info_clienti$ClientKnowledgeExperience>=0 & dataset_info_clienti$ClientKnowledgeExperience<=0.25))
+length(which(dataset_info_clienti$ClientKnowledgeExperience>0.25 & dataset_info_clienti$ClientKnowledgeExperience<=0.5))
+length(which(dataset_info_clienti$ClientKnowledgeExperience>0.5 & dataset_info_clienti$ClientKnowledgeExperience<=0.75))
+length(which(dataset_info_clienti$ClientKnowledgeExperience>0.75))
+#22
+#1069
+#2801
+#1108
+
+#ClientPotentialIndex, potenziale di crescita del client:
+#Per il ClientPotentialIndex sopra il 50% dei clienti presenta un indice tra 0.00 e 0.25, è comunque presente una buona percentuale, circa il 10% superiore al 0.50
+length(which(dataset_info_clienti$ClientPotentialIndex>=0 & dataset_info_clienti$ClientPotentialIndex<=0.25))
+length(which(dataset_info_clienti$ClientPotentialIndex>0.25 & dataset_info_clienti$ClientPotentialIndex<=0.5))
+length(which(dataset_info_clienti$ClientPotentialIndex>0.5 & dataset_info_clienti$ClientPotentialIndex<=0.75))
+length(which(dataset_info_clienti$ClientPotentialIndex>0.75))
+#2883
+#1610
+#425
+#82
+
+#IncomeHighLow, misura la capacità del reddito del cliente:
+#La maggior parte dei clienti, quasi il 90%, presenta un reddito basso
+length(which(dataset_info_clienti$IncomeHighLow>=0 & dataset_info_clienti$IncomeHighLow<=0.25))
+length(which(dataset_info_clienti$IncomeHighLow>0.25 & dataset_info_clienti$IncomeHighLow<=0.5))
+length(which(dataset_info_clienti$IncomeHighLow>0.5 & dataset_info_clienti$IncomeHighLow<=0.75))
+length(which(dataset_info_clienti$IncomeHighLow>0.75))
+#4608
+#0
+#0
+#392
+
+#Sex, sesso del cliente:
+#Il sesso dei clienti non è un elemento differenziante dato che vi è una equa distribuzione tra uomini e donne.
+length(which(dataset_info_clienti$Sex == 0))
+length(which(dataset_info_clienti$Sex == 1))
+#2472
+#2528
+
+#AuM, denaro investito:
+#La maggior parte dei clienti ha un investimento inferiore a 3 milioni 750 mila euro
+length(which(dataset_info_clienti$AuM>=0 & dataset_info_clienti$AuM<= 3750000))
+length(which(dataset_info_clienti$AuM >= 3750000 & dataset_info_clienti$AuM<=7500000))
+length(which(dataset_info_clienti$AuM > 7500000 & dataset_info_clienti$AuM<= 11250000))
+length(which(dataset_info_clienti$AuM > 11250000))
+#4983
+#13
+#2
+#2
+
+#Age, anni dei clienti:
+#L'età dei clienti è compresa maggiormente tra 25 anni e 75 anni, ma comunque il numero di clienti maggiore di 75 anni è comunque considerevole
+length(which(dataset_info_clienti$Age>=0 & dataset_info_clienti$Age<=25))
+length(which(dataset_info_clienti$Age>25 & dataset_info_clienti$Age<=50))
+length(which(dataset_info_clienti$Age>50 & dataset_info_clienti$Age<=75))
+length(which(dataset_info_clienti$Age>75))
+#320
+#1736
+#2285
+#659
+
+#IncomeNeed, che è l'indice che rappresenta il bisogno di reddito
+#Il 50% esatto dei clienti presenta un incomeneed compreso tra 0.25 e 0.50
+length(which(dataset_info_clienti$IncomeNeed>=0 & dataset_info_clienti$IncomeNeed<=0.25))
+length(which(dataset_info_clienti$IncomeNeed>0.25 & dataset_info_clienti$IncomeNeed<=0.5))
+length(which(dataset_info_clienti$IncomeNeed>0.5 & dataset_info_clienti$IncomeNeed<=0.75))
+length(which(dataset_info_clienti$IncomeNeed>0.75))
+#1749
+#2500
+#478
+#273
+
+#LongTempCareNeed, ossia l'indice del bisogno di cure a lungo termine da anziano:
+length(which(dataset_info_clienti$LongTermCareNeed>=0 & dataset_info_clienti$LongTermCareNeed<=0.25))
+length(which(dataset_info_clienti$LongTermCareNeed>0.25 & dataset_info_clienti$LongTermCareNeed<=0.5))
+length(which(dataset_info_clienti$LongTermCareNeed>0.5 & dataset_info_clienti$LongTermCareNeed<=0.75))
+length(which(dataset_info_clienti$LongTermCareNeed>0.75))
+#1564
+#1124
+#1079
+#1233
+
+#Protection Need, ossia Indice del bisogno di protezione (del capitale o della persona)
+length(which(dataset_info_clienti$ProtectionNeed>=0 & dataset_info_clienti$ProtectionNeed<=0.25))
+length(which(dataset_info_clienti$ProtectionNeed>0.25 & dataset_info_clienti$ProtectionNeed<=0.5))
+length(which(dataset_info_clienti$ProtectionNeed>0.5 & dataset_info_clienti$ProtectionNeed<=0.75))
+length(which(dataset_info_clienti$ProtectionNeed>0.75))
+#1815
+#1875
+#1100
+#210
+
+#PensionNeed, ossia Indice del bisogno di previdenza integrativa
+length(which(dataset_info_clienti$PensionNeed>=0 & dataset_info_clienti$PensionNeed<=0.25))
+length(which(dataset_info_clienti$PensionNeed>0.25 & dataset_info_clienti$PensionNeed<=0.5))
+length(which(dataset_info_clienti$PensionNeed>0.5 & dataset_info_clienti$PensionNeed<=0.75))
+length(which(dataset_info_clienti$PensionNeed>0.75))
+#1696
+#707
+#2403
+#194
+
+#InheritanceIndex, Indice del bisogno di ottimizzazione successoria/fiscale
+length(which(dataset_info_clienti$InheritanceIndex>=0 & dataset_info_clienti$InheritanceIndex<=0.25))
+length(which(dataset_info_clienti$InheritanceIndex>0.25 & dataset_info_clienti$InheritanceIndex<=0.5))
+length(which(dataset_info_clienti$InheritanceIndex>0.5 & dataset_info_clienti$InheritanceIndex<=0.75))
+length(which(dataset_info_clienti$InheritanceIndex>0.75))
+#855
+#1422
+#2431
+#292
+
+#PanicMood, Tendenza ad andare in panico
+length(which(dataset_info_clienti$PanicMood == 0 ))
+length(which(dataset_info_clienti$PanicMood == -1))
+#4934
+#66
+
+#NoTrustInBanks, che sarebbe la tendenza a non fidarsi della banca:
+length(which(dataset_info_clienti$NoTrustInBanks == 0 ))
+length(which(dataset_info_clienti$NoTrustInBanks == 1))
+#4419
+#581
+
+```
+
+```{r}
+#ANDIAMO AD OSSERVARE LE PERCENTUALI Delle proporzioni relative:
+#49.44% sono donne, 50.56% sono uomini
+table(dataset_info_clienti$Sex)/length(dataset_info_clienti$Sex)
+
+#il 0.0132% va in Panico, mentre il 0.9869 va in panico:
+table(dataset_info_clienti$PanicMood)/length(dataset_info_clienti$PanicMood)
+
+```
+
+
+```{r}
+#Calcoliamo quanti valori ci sono per range di 0,1:
+#Per una questione di osservazione migliore, calcoliamo dei range più ristretti per quanto riguarda la variabile RiskPropension, che ci permette di capire meglio la distribuzione:
+br = seq(0,1,by=0.1)
+ranges = paste(head(br,-1), br[-1], sep=" - ")
+freq   = hist(dataset_info_clienti$RiskPropension, breaks=br, include.lowest=TRUE, plot=FALSE)
+data.frame(range = ranges, frequency = freq$counts)
+
+```
+
+
+```{r}
+#Osserviamo le differenze come uomo o donna rispetto alla propensione al rischio e all'orizzonte di investimento. Notiamo che l'orizzonte di investimento più elevato è rappresentato da soggetti prettamente maschili, con casi sporadici di donne.
+ggplot(dataset_individuale, aes(x=dataset_individuale$RiskPropension, y=dataset_individuale$ClientInvestmentHorizon, col = dataset_individuale$Sex)) + 
+    geom_point(size=1.2)
+#Notiamo una maggioranza di "pallini blu", ad indicare la maggioranza di uomini
+```
+CONTEGGIO DEI CLIENTI NELLE PROVINCE 
+```{r}
+conteggio <- table(dataset_info_clienti$Prov)
+```
+
+```{r}
+#Andiamo a realizzare una mappa geografica per capire meglio il numero dei vari clienti nella varie regioni d'Italia:
+library(devtools)
+install.packages("remotes")
+remotes::install_github("quantide/mapIT")
+library(mapIT)
+densita.servizio <- data.frame(
+    Regione = c("Abruzzo", "Basilicata", "Calabria", "Campania", "Emilia-Romagna",
+                "Friuli-Venezia Giulia", "Lazio", "Liguria", "Lombardia", "Marche",
+                "Molise", "Piemonte", "Puglia", "Sardegna", "Sicilia", "Toscana",
+                "Trentino-Alto Adige", "Umbria", "Valle d\'Aosta", "Veneto"),
+    Num = c(63,4,70,46,612,68,365,202,1783,56,8,223,68,33,97,388,102,22,2,572))
+mapIT(Num,Regione, data=densita.servizio, graphPar = list(title = "posizione dei clienti"))
+```
+Studio preliminare di eventuali relazioni e pattern ricorrenti:
+```{r}
+library(ggridges)
+library(ggplot2)
+library(hrbrthemes)
+library(fmsb)
+library(hexbin)
+library(RColorBrewer)
+library(GGally)
+
+
+#Andiamo a vedere la densità di clienti per età che hanno un clientpotentialindex minore di 0.50
+d %>%
+  filter( ClientPotentialIndex<0.5 ) %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8) +
+    ggtitle("Qual è la densità di età per i clienti con un ClientPotentialIndex minore di 0.5") +
+    theme_ipsum()
+#Andiamo a vedere la densità di clienti per età che hanno un clientpotentialindex maggiore di 0.50
+d %>%
+  filter( ClientPotentialIndex>0.5 ) %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8) +
+    ggtitle("Qual è la densità di età per i clienti con un ClientPotentialIndex maggiore di 0.5") +
+    theme_ipsum()
+#Andiamo a vedere i clienti che hanno un ClientPotentialIndex maggiore di 0.5 sulla base della variabile IncomeNeed:
+d %>%
+  filter( ClientPotentialIndex>0.5 ) %>%
+  ggplot( aes(x=IncomeNeed)) +
+    geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8) +
+    ggtitle("Qual è la densità di età per i clienti con un ClientPotentialIndex minore di 0.5") +
+    theme_ipsum()
+
+#Andiamo ad osservare le correlazioni globali del dataset:
+correlazioni_su_tutto_dataset <- data.frame(cor(d_solo_numerico))
+correlazioni_su_tutto_dataset
+
+#Commenti correlazioni tramite degli scatterplot:
+#Possiamo vedere in particolare in questo scatterplot, come all'aumentare dell'età, abbiamo una netta riduzione del riskpropension, non è perfetta, perchè comunque osserviamo la presenza di alcune osservazioni lontane:
+ggplot(data=d_solo_numerico, aes(x=Age, RiskPropension)) +
+  geom_point() +
+  geom_rug(col="steelblue",alpha=0.1, size=1.5)
+
+#Andiamo a vedere come il PensionNeed non cambia per niete a seguito dell'aumentare del ClientInvestimentHorizon. 
+ggplot(dataset_individuale, aes(x=d_solo_numerico$ClientInvestmentHorizon, y=d_solo_numerico$PensionNeed, color= d_solo_numerico$)) + 
+    geom_point(size=1.2)
+
+#Notiamo una correlazione al 50%
+ggplot(data=d_solo_numerico, aes(x=ClientPotentialIndex, ClientKnowledgeExperience)) +
+  geom_point() +
+  geom_rug(col="steelblue",alpha=0.1, size=1.5)
+
+#Notiamo una correlazione al 50% circa
+ggplot(data=d_solo_numerico, aes(x=AuM, IncomeNeed)) +
+  geom_point() +
+  geom_rug(col="steelblue",alpha=0.1, size=1.5)
+
+#Abbiamo un'alta correlazione tra Age ed InheritanceIndex
+#Cosa possiamo notare, alta correlazione (0.77), quindi al crescere dell'età, aumenta anche l'InheritanceIndex, che è l'Indice del bisogno di ottimizzazione successoria/fiscale
+ggplot(data=d_solo_numerico, aes(x=Age, InheritanceIndex)) +
+  geom_point() +
+  geom_rug(col="steelblue",alpha=0.1, size=1.5)
+
+#Correlazione negativa (-0.80) tra l'età ed il Risk Propension:
+#Al crescere dell'età, le persone sono decisamente meno propense al rischio.
+ggplot(data=d_solo_numerico, aes(x=Age, RiskPropension)) +
+  geom_point() +
+  geom_rug(col="steelblue",alpha=0.1, size=1.5)
+
+#Al crescere della propensione al rischio delle persone, possiamo notare come l'orizzonte di investimento dei clienti comunque cresce, anche se non in maniera eccessiva, infatti la correlazione è positiva (0.31), ma comunque bassa.
+ggplot(data=d_solo_numerico, aes(x=Age, RiskPropension)) +
+  geom_point() +
+  geom_rug(col="steelblue",alpha=0.1, size=1.5)
+
+#Notiamo una correlazione tra Risk Propension e PensionNeed (0.56), segno di come al crescere della propensione al rischio delle persone, aumenta la pensioneed dei clienti. Sapendo che la pensionneed decresce, al crescere dell'età, in maniera rilevante (-0.73), possiamo dire e quindi confermare come la RiskPropension sia negaticamente correlata con l'età.
+#Notiamo anche la presenza di due gruppi, pressochè distinti di clienti.
+ggplot(data=d_solo_numerico, aes(x=PensionNeed, RiskPropension)) +
+  geom_point() +
+  geom_rug(col="steelblue",alpha=0.1, size=1.5)
+
+#Presente una correlazione negativa tra LongTermCareNeed e InheritanceIndex (-0.66), quindi al crescere di LonGTermCareNeed decresce in maniera rilevante InheritanceIndex. Le persone al crescere del bisogno di cure a lungo termine di anziano, minore sarà il bisogno di ottimizzazione successoria/fiscale.
+ggplot(data=d_solo_numerico, aes(x=Age, RiskPropension)) +
+  geom_point() +
+  geom_rug(col="steelblue",alpha=0.1, size=1.5)
+
+#Andiamo ad utilizzare un grafico sulla rappresentazione 2D:
+d_con_cluster_finito
+ggplot(d_con_cluster_finito, aes(x=Age, y=PensionNeed) ) +
+  geom_hex(bins = 70) +
+  scale_fill_continuous(type = "viridis") +
+  theme_bw()
+#Possiamo notare 3 differenti gruppi per quanto riguarda il LongTermCareNeed:
+ggplot(d_con_cluster_finito, aes(x=Age, y=LongTermCareNeed) ) +
+  geom_hex(bins = 70) +
+  scale_fill_continuous(type = "viridis") +
+  theme_bw()
+ 
+#ANALISI ESPLORATIVA DATASET IN GENERALE:
+plot(d_solo_numerico$RiskPropension)
+plot(d_con_cluster_finito$Age)
+#Notiamo nel portfoliorisk la presenza di outliers piuttosto marcati, di come i clienti con un elevato rischio sono piuttosto pochi:
+plot(d_con_cluster_finito$PortfolioRisk)
+plot(d_con_cluster_finito$RiskPropension, d_con_cluster_finito$Age)
+
+
+```
+MISSING VALUES
+```{r}
+#vediamo eventuali missing values.
+#con questa rappresentazione vengono rappresentati in rosso i valori missing ed in che percentuale sull'intero dataset:
+aggr_missing_ <- aggr(dataset_individuale, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(dataset_individuale), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
+#andiamo a contare, solamente per la colonna di riferimento, il numero di missing:
+missingcount_prov<- data.frame(colSums(is.na(dataset_individuale)))
+missingcount_prov
+#possiamo contare la presenza di 123 valori mancanti:
+#Probabilmente si tratta della provincia di Napoli, essendo combaciare con l'omonima scritta NA.
+```
+CLUSTERING INIZIO 
+CLUSTERING OBIETTIVI E BISOGNI
+```{r}
+#K-MEDOIDS 
+#decidiamo di utilizzare come algoritmo il clara perchè...
+#decidiamo di utilizzare come distanza la manhattan perchè meno sensibili agli outliers:
+library(cluster)
+library(factoextra)
+library(clustertend)
+library(NbClust)
+library(fpc)
+library(clValid)
+library(vegan)
+
+#Andiamo a creare il clustering con le variabili che mi interessano per effettuare il clustering sui bisogni:
+test_cluster_bisogni_obiettivi_1<- subset(d,select=c(Age, IncomeNeed, LongTermCareNeed, ProtectionNeed, PensionNeed, InheritanceIndex))
+#Vado a standardizzare il dataset appena creato con le variabili dei clienti legate ai bisogni e obiettivi:
+test_cluster_bisogni_obiettivi_1_standardizzato <- decostand(test_cluster_bisogni_obiettivi_1, "max", MARGIN=2)
+summary(test_cluster_bisogni_obiettivi_1_standardizzato)
+
+#Correlazioni nel dataset delle variabili che abbiamo selezionato per i bisogni:
+#Notiamo correlazione positiva tra Age ed InheritanceIndex (0.7786), tra Age ed IncomeNeed (0.64), una correlazione negativa tra PensionNeed ed Age (-0.739), correlazione negativa tra Age ed LongTermCareNeed (-0.53), una correlazione negativa tra LongTermCareNeed e InheritanceIndex (-0.66).
+#Commento legato con le PCA.
+data.frame(cor(test_cluster_bisogni_obiettivi_1_standardizzato))
+
+#andiamo a calcolare la distanza con i vari metodi:
+#in questo caso facciamo la distanza in base alla euclidea:
+dist.eucl_bisogni <- dist(test_cluster_bisogni_obiettivi_1_standardizzato, method = "euclidean")
+round(as.matrix(dist.eucl_bisogni)[10,], 1)
+#facciamo la distanza in base alla manhattan
+#decidiamo di utilizzare la distanza di manhattan poichè è poco sensibili agli outliers, visto che comunque il nostro dataset ne presenta molti in maniera rilevanti:
+dist.manhattan_bisogni <- dist(test_cluster_bisogni_obiettivi_1_standardizzato, method = "manhattan")
+round(as.matrix(dist.manhattan_bisogni)[10,], 1)
+dist.manhattan_bisogni
+
+#Abbiamo testato vari metodo per i nostri cluster, kmeans, pam, hierarchical, ma per rendere più semplice la comprensione, andiamo a rimuovere i passaggi dei test dei vari metodi di clustering. 
+
+#clara con 9 clusters
+#Abbiamo effettuato un cluster con metodo clara, indicando 9 clusters come risultato finale, visto che per alcune, poche, metrice, il numero suggerito era 9, poichè di queste metriche i risultati da minimizzare, combaciavano con quelli apppunto di 9 clusters.
+#Possiamo anche riscontrare dalla rappresentazione, un mix eterogeneo e non nettamente distinguibile di alcuni individui.
+clara_test_cluster_bisogni_obiettivi <- clara(test_cluster_bisogni_obiettivi_1_standardizzato, 9, metric = "manhattan", stand = FALSE, samples = 500, pamLike = FALSE)
+clara_test_cluster_bisogni_obiettivi
+clara_test_cluster_bisogni_obiettivi$clusinfo
+fviz_cluster(clara_test_cluster_bisogni_obiettivi,
+  palette = c("#00AFBB", "#FC4E07", "black", "blue", "green", "orange", "yellow", "grey", "lightblue"),
+  ellipse.type = "t",
+  ggtheme = theme_classic()
+)
+
+#scegliamo di utilizzare l'algoritmo partizionale clara, dato che si adatta meglio a grandi dataset, inoltre essendo una implementazione del pam, è meno sensibili agli outliers, aspetto che come abbiamo visto, va decisamente a colpire eventuali clienti che non rientrano nei "canoni" normali.
+#Scegliamo di utilizzare 5 clusters, poichè in base al criterio dell'Elbow e silhouette vediamo che i valori migliori di cluster sono in 5 clusters.
+#clara con 5 clusters:
+clara_test_cluster_bisogni_obiettivi_5_clusters <- clara(test_cluster_bisogni_obiettivi_1_standardizzato, 5, metric = "manhattan", stand = FALSE, samples = 500, pamLike = FALSE)
+clara_test_cluster_bisogni_obiettivi_5_clusters$clusinfo
+fviz_cluster(clara_test_cluster_bisogni_obiettivi_5_clusters,
+  palette = c("#00AFBB", "#FC4E07", "black", "blue", "green"),
+  ellipse.type = "t",
+  ggtheme = theme_classic()
+)
+#Andiamo a vedere i medoidi che caratterizzano i 5 clusters che abbiamo trovato:
+clara_test_cluster_bisogni_obiettivi_5_clusters$medoids
+
+#Andiamo ad effettuare un cluster di 6 gruppi, come numero ci è stato indicato da parte di metriche:
+#clara con 6 clusters:
+clara_test_cluster_bisogni_obiettivi_6_clusters <- clara(test_cluster_bisogni_obiettivi_1_standardizzato, 6, metric = "manhattan", stand = FALSE, samples = 500, pamLike = FALSE)
+clara_test_cluster_bisogni_obiettivi_6_clusters$clusinfo
+fviz_cluster(clara_test_cluster_bisogni_obiettivi_6_clusters,
+  palette = c("#00AFBB", "#FC4E07", "black", "blue", "green", "orange"),
+  ellipse.type = "t",
+  ggtheme = theme_classic()
+)
+
+#Abbiamo voluto vedere il clara su 7 gruppi come numero di cluster in cui dividere, ma non siamo soddisfatti dei risultati:
+#clara con 7 clusters:
+clara_test_cluster_bisogni_obiettivi_7_clusters <- clara(test_cluster_bisogni_obiettivi_1_standardizzato, 7, metric = "manhattan", stand = FALSE, samples = 500, pamLike = FALSE)
+clara_test_cluster_bisogni_obiettivi_7_clusters$clusinfo
+fviz_cluster(clara_test_cluster_bisogni_obiettivi_7_clusters,
+  palette = c("#00AFBB", "#FC4E07", "black", "blue", "green", "orange", "lightblue"),
+  ellipse.type = "t",
+  ggtheme = theme_classic()
+)
+
+#Abbiamo fatto un confronto con il metodo pam, che ricordiamo, è il metodo dal quale il clara si è poi ispirato, visto che il clara è più adatto per dataset più numerosi.
+pam_test_1_bisogni <- pam(test_cluster_bisogni_obiettivi_1_standardizzato, 5, metric = "manhattan", stand = FALSE)
+fviz_cluster(pam_test_1_bisogni, palette = c("#00AFBB", "#FC4E07", "black", "blue", "green"), ellipse.type = "t",repel = TRUE, ggtheme = theme_classic()
+)
+
+#andiamo ad aggiungere la colonna dei cluster al dataset originale, creando un nuovo dataset:
+#una volta trovati i cluster con il metodo clara, con 5 clusters, siamo andati ad aggiungere questa classificazione dei cluster, all'interno del dataset di riferimento:
+test_bisogni_clusterizzati<- cbind(test_cluster_bisogni_obiettivi_1_standardizzato, cluster_clara_9 = clara_test_cluster_bisogni_obiettivi$cluster, cluster_clara_5 = clara_test_cluster_bisogni_obiettivi_5_clusters$cluster, clienti = d$ClientID, etànormale = d$Age)
+head(test_bisogni_clusterizzati)
+#Eseguiamo un plot per visualizzare meglio in questo caso l'età legata ai diversi cluster:
+plot(test_bisogni_clusterizzati$Age ~ test_bisogni_clusterizzati$cluster , test_bisogni_clusterizzati)
+as.data.frame(table(cut(test_bisogni_clusterizzati$Age, breaks=seq(0,1, by=0.05)), test_bisogni_clusterizzati$cluster))
+table(d$Age, test_bisogni_clusterizzati$cluster)
+test_bisogni_clusterizzati
+
+#cluster tendency:
+#per prima cosa, essendo presenti più di due variabili, andiamo a rappresentare con due sole dimensioni:
+#Hopkins per capire se il nostro dataset è buono per delle considerazioni di cluster:
+#deve essere il più vicino possibilie allo zero, così da rifiutare l'ipotesi alternativa nulla e quindi concludere che il dataset è clusterizzabile;
+test_cluster_bisogni_obiettivi_1_standardizzato
+set.seed(123)
+hopkins(test_cluster_bisogni_obiettivi_1_standardizzato, n= nrow(test_cluster_bisogni_obiettivi_1_standardizzato)-1)
+#il valore è 0.1597, quindi il dataset è clusterizzabile:
+
+#Andiamo ad utilizzare le tre tipologie di metrice chiamate Elbow, Silhouette e Gap Statistics, per capire per ogni metodo quale potrebbe essere la soluzione come numero di cluster ottimale, ricordiamo che sono cluster consigliati in base a delle metriche statistiche, quindi sono opportunamente da commentare e capire quali possono essere più utili per il nostro problema.
+#utilizziamo kmeans e gap_stat:
+fviz_nbclust(test_cluster_bisogni_obiettivi_1_standardizzato, kmeans, method = "gap_stat")
+#utilizziamo clara e gap_stat:
+#il clara secondo il metodo del gap_stat, presenta un crescere di valore vino a 8, numero che teniamo in considerazione.
+fviz_nbclust(test_cluster_bisogni_obiettivi_1_standardizzato, clara, method = "gap_stat") #ne da 8
+#utilizziamo pam e gap_stat: (non funziona, ci mette troppo)
+fviz_nbclust(test_cluster_bisogni_obiettivi_1_standardizzato, pam, method = "gap_stat")
+#utilizziamo hcut e gap_stat: (salvato)
+fviz_nbclust(test_cluster_bisogni_obiettivi_1_standardizzato, hcut, method = "gap_stat")
+#UTILIZZIAMO KMEANS E WSS:
+fviz_nbclust(test_cluster_bisogni_obiettivi_1_standardizzato, kmeans, method = "wss") + geom_vline(xintercept = 9, linetype = 2) + labs(subtitle = "kmeans e wss method")
+#Utilizziamo clara e wss:
+#possiamo vedere come dal numero 5 di cluster la variabilità non ha una decrescita rilevante come nelle situazioni precedenti:
+fviz_nbclust(test_cluster_bisogni_obiettivi_1_standardizzato, clara, method = "wss") + geom_vline(xintercept = 9, linetype = 2) + labs(subtitle = "clara e wss method")
+#utilizziamo pam e wss:
+fviz_nbclust(test_cluster_bisogni_obiettivi_1_standardizzato, pam, method = "wss") + geom_vline(xintercept = 9, linetype = 2) + labs(subtitle = "pam e wss method")
+#utilizziamo hcut e wss:
+fviz_nbclust(test_cluster_bisogni_obiettivi_1_standardizzato, hcut, method = "wss") + geom_vline(xintercept = 9, linetype = 2) + labs(subtitle = "hcut e wss method")
+#utilizziamo kmeans e silhouette:
+fviz_nbclust(test_cluster_bisogni_obiettivi_1_standardizzato, kmeans, method = "silhouette") + labs(subtitle = "kmeans e wss method")
+#utilizziamo clara e silhouette:
+#secondo la silhouette possiamo vedere come il numero consigliato di cluster dovrebbe essere 5, essendo che si tratta della distanza tra clusters, e sapendo che non è altamente clusterizzabile il nostro cluster, cercare di tendere al massimo la distanza tra i clusters stessi, rimane uno degli aspetti principali, quindi scegliamo di utilizzare 5 clusters, anche più semplici da osservare e commentare.
+fviz_nbclust(test_cluster_bisogni_obiettivi_1_standardizzato, clara, method = "silhouette") + labs(subtitle = "kmeans e wss method")
+#utilizziamo pam e silhouette: (anche in questo caso 5)
+fviz_nbclust(test_cluster_bisogni_obiettivi_1_standardizzato, pam, method = "silhouette") + labs(subtitle = "kmeans e silhouette method")
+#utilizziamo hcut e silhouette:
+fviz_nbclust(test_cluster_bisogni_obiettivi_1_standardizzato, hcut, method = "silhouette") + labs(subtitle = "hcut e silhouette method")
+
+
+#ECLUST con clara:
+#Ci permette di avere della statistiche aggiuntive sui nostri cluster che abbiamo realizzato con il metodo clara con 5 gruppi.
+clara.res_bisogni_5_clusters <- eclust(test_cluster_bisogni_obiettivi_1_standardizzato, "clara", k = 5, hc_metric = "manhattan", graph = FALSE)
+fviz_cluster(clara.res_bisogni_5_clusters, geom = "point", ellipse.type = "norm",
+palette = "jco", ggtheme = theme_minimal())
+#Andiamo a visualizzare la silhouette per il cluster creato con metodo clara su 5 cluster impostati:
+fviz_silhouette(clara.res_bisogni_5_clusters, palette = "jco", ggtheme = theme_classic())
+#studio della silhouette:
+#La silhouette è presa come uno degli indici fondamentali, poichè ci interessa aumentare il più possibile la distanza tra i vari clusters:
+silinfo_bisogni_5_clusters <- clara.res_bisogni_5_clusters$silinfo
+names(silinfo_bisogni_5_clusters)
+silinfo_bisogni_5_clusters$clus.avg.widths
+silinfo_bisogni_5_clusters$avg.width
+clara.res_bisogni_5_clusters$size
+
+#Calcoliamo il valore di Dunn:
+clara_stats_5_clusters <- cluster.stats(dist.manhattan_bisogni, clara_test_cluster_bisogni_obiettivi_5_clusters$cluster)
+clara_stats_5_clusters$dunn
+#valore 0.02136
+
+# Compute cluster stats
+cluster_vari<- as.numeric(clara.res_bisogni_5_clusters$cluster) 
+clust_stats_vari <- cluster.stats(d = dist.manhattan_bisogni, cluster_vari, clara.res_bisogni_5_clusters$cluster)
+# Corrected Rand index
+clust_stats_vari$corrected.rand
+clust_stats_vari$vi
+
+
+# confronti tra i risultati dei cluster con l'eclust:
+clara.res_obiettivi <- eclust(test_cluster_bisogni_obiettivi_1_standardizzato, "clara", hc_metric = "manhattan", graph = FALSE) 
+fviz_cluster(clara.res_obiettivi, geom = "point", ellipse.type = "norm", palette = "jco", ggtheme = theme_minimal())
+cluster.stats(d = dist(test_cluster_bisogni_obiettivi_1_standardizzato),clara_test_cluster_bisogni_obiettivi$cluster, clara.res_obiettivi$cluster)$vi
+
+#Andiamo ad effettuare l'analisi delle misure interne, in particolare osserviamo la connectivity, la silhouette e la dunn.
+#Rispettivamente andiamo a fornire una breve introduzione alle tre metriche:
+#Connectivity = ha un valore da 0 a infinito e dovrebbe essere minimizzato, corresponds to what extent items are placed in the same cluster as their nearest neighbors in the data space.
+#silhouette = misura la distanza media dei cluster tra di loro, quindi sarebbe una sorta di indice di distanza;
+#dunn = dovrebbe essere massimizzato, più è alto più le distanze dei cluster e i loro diametri sono elevate;
+#Partendo dalla considerazione che i valori degli algoritmi partizionali 
+clmethods <- c("hierarchical","pam", "clara") 
+intern_obiettivi <- clValid(test_cluster_bisogni_obiettivi_1_standardizzato, nClust = 2:9, metric = "manhattan", clMethods = clmethods, validation = "internal") 
+summary(intern_obiettivi)
+
+#Andiamo a calcolare gli indici esterni per valutare gli indici dei vari metodi:
+stab_obiettivi <- clValid(test_cluster_bisogni_obiettivi_1_standardizzato, nClust = 2:9,metric = "manhattan", clMethods = clmethods, validation = "stability")
+summary(stab_obiettivi)
+
+#kmeans sul dataset standardizzato:
+#osserviamo che i valori non ci convincono:
+km.res1_bisogni <- kmeans(test_cluster_bisogni_obiettivi_1_standardizzato, 5)
+fviz_cluster(list(data = test_cluster_bisogni_obiettivi_1_standardizzato, cluster = km.res1_bisogni$cluster),
+ellipse.type = "norm", geom = "point", stand = FALSE, palette = "jco", ggtheme = theme_classic())
+```
+STUDIO DEL CLARA SU 5 CLUSTERS:
+```{r}
+library(ggridges)
+library(ggplot2)
+library(viridis)
+library(hrbrthemes)
+
+variabili_bisogni <- c("Age", "IncomeNeed", "LongTermCareNeed", "ProtectionNeed", "PensionNeed", "InheritanceIndex", "etànormale")
+
+test_bisogni_clusterizzati
+
+#Creo dei cluster con solo i clienti appartenenti a quel determinato cluster:
+cluster1_bisogni_5_cluster <- test_bisogni_clusterizzati[test_bisogni_clusterizzati$cluster_clara_5 == 1, ]
+cluster1_bisogni_5_cluster
+cluster2_bisogni_5_cluster <- test_bisogni_clusterizzati[test_bisogni_clusterizzati$cluster_clara_5 == 2, ]
+cluster2_bisogni_5_cluster
+cluster3_bisogni_5_cluster <- test_bisogni_clusterizzati[test_bisogni_clusterizzati$cluster_clara_5 == 3, ]
+cluster3_bisogni_5_cluster
+cluster4_bisogni_5_cluster <- test_bisogni_clusterizzati[test_bisogni_clusterizzati$cluster_clara_5 == 4, ]
+cluster4_bisogni_5_cluster
+cluster5_bisogni_5_cluster <- test_bisogni_clusterizzati[test_bisogni_clusterizzati$cluster_clara_5 == 5, ]
+cluster5_bisogni_5_cluster
+
+#Vediamo i range di età:
+print("cluster 1 range età:")
+range(cluster1_bisogni_5_cluster$etànormale)
+print("cluster 2 range età:")
+range(cluster2_bisogni_5_cluster$etànormale)
+print("cluster 3 range età:")
+range(cluster3_bisogni_5_cluster$etànormale)
+print("cluster 4 range età:")
+range(cluster4_bisogni_5_cluster$etànormale)
+print("cluster 5 range età:")
+range(cluster5_bisogni_5_cluster$etànormale)
+
+#range dei cluster per l'incomeneed:
+print("cluster 1 range IncomeNeed:")
+range(cluster1_bisogni_5_cluster$IncomeNeed)
+print("cluster 2 range IncomeNeed:")
+range(cluster2_bisogni_5_cluster$IncomeNeed)
+print("cluster 3 range IncomeNeed:")
+range(cluster3_bisogni_5_cluster$IncomeNeed)
+print("cluster 4 range IncomeNeed:")
+range(cluster4_bisogni_5_cluster$IncomeNeed)
+print("cluster 5 range IncomeNeed:")
+range(cluster5_bisogni_5_cluster$IncomeNeed)
+
+#range PensionNeed per ogni cluster:
+print("cluster 1 range PensioNeed:")
+range(cluster1_bisogni_5_cluster$PensionNeed)
+print("cluster 2 range PensioNeed:")
+range(cluster2_bisogni_5_cluster$PensionNeed)
+print("cluster 3 range PensioNeed:")
+range(cluster3_bisogni_5_cluster$PensionNeed)
+print("cluster 4 range PensioNeed:")
+range(cluster4_bisogni_5_cluster$PensionNeed)
+print("cluster 5 range PensioNeed:")
+range(cluster5_bisogni_5_cluster$PensionNeed)
+
+#range LongTermNeed per ogni cluster:
+print("cluster 1 range LongTermCareNeed:")
+range(cluster1_bisogni_5_cluster$LongTermCareNeed)
+print("cluster 2 range LongTermCareNeed:")
+range(cluster2_bisogni_5_cluster$LongTermCareNeed)
+print("cluster 3 range LongTermCareNeed:")
+range(cluster3_bisogni_5_cluster$LongTermCareNeed)
+print("cluster 4 range LongTermCareNeed:")
+range(cluster4_bisogni_5_cluster$LongTermCareNeed)
+print("cluster 5 range LongTermCareNeed:")
+range(cluster5_bisogni_5_cluster$LongTermCareNeed)
+
+#range ProtectionNeed per ogni cluster:
+print("cluster 1 range ProtectionNeed:")
+range(cluster1_bisogni_5_cluster$ProtectionNeed)
+print("cluster 2 range ProtectionNeed:")
+range(cluster2_bisogni_5_cluster$ProtectionNeed)
+print("cluster 3 range ProtectionNeed:")
+range(cluster3_bisogni_5_cluster$ProtectionNeed)
+print("cluster 4 range ProtectionNeed:")
+range(cluster4_bisogni_5_cluster$ProtectionNeed)
+print("cluster 5 range ProtectionNeed:")
+range(cluster5_bisogni_5_cluster$ProtectionNeed)
+
+#range InheritanceIndex per ogni cluster:
+print("cluster 1 range InheritanceIndex:")
+range(cluster1_bisogni_5_cluster$InheritanceIndex)
+print("cluster 2 range InheritanceIndex:")
+range(cluster2_bisogni_5_cluster$InheritanceIndex)
+print("cluster 3 range InheritanceIndex:")
+range(cluster3_bisogni_5_cluster$InheritanceIndex)
+print("cluster 4 range InheritanceIndex:")
+range(cluster4_bisogni_5_cluster$InheritanceIndex)
+print("cluster 5 range InheritanceIndex:")
+range(cluster5_bisogni_5_cluster$InheritanceIndex)
+
+#Andiamo ad osservare i medoidi del cluster con metodo clara su 5 cluster dei bisogni dei clienti:
+clara_test_cluster_bisogni_obiettivi_5_clusters$medoids
+
+#Andiamo a vedere la densità rappresentata:
+#Utilizziamo questi istogrammi 
+h_clara_5_cluster_1 <- hist(cluster1_bisogni_5_cluster$IncomeNeed, breaks=100, col="red")
+xfit_cluster1<-seq(min(cluster1_bisogni_5_cluster$IncomeNeed),max(cluster1_bisogni_5_cluster$IncomeNeed),length=40)
+yfit_cluster1<-dnorm(xfit_cluster1,mean=mean(cluster1_bisogni_5_cluster$IncomeNeed),sd=sd(cluster1_bisogni_5_cluster$IncomeNeed))
+yfit_cluster1 <- yfit_cluster1*diff(h_clara_5_cluster_1$mids[1:2])*length(cluster1_bisogni_5_cluster$IncomeNeed)
+lines(xfit_cluster1, yfit_cluster1, col="blue", lwd=2)
+h_clara_5_cluster_2 <- hist(cluster2_bisogni_5_cluster$IncomeNeed, breaks=100, col="green")
+xfit_cluster2<-seq(min(cluster2_bisogni_5_cluster$IncomeNeed),max(cluster2_bisogni_5_cluster$IncomeNeed),length=40)
+yfit_cluster2<-dnorm(xfit_cluster2,mean=mean(cluster2_bisogni_5_cluster$IncomeNeed),sd=sd(cluster2_bisogni_5_cluster$IncomeNeed))
+yfit_cluster2 <- yfit_cluster2*diff(h_clara_5_cluster_2$mids[1:2])*length(cluster2_bisogni_5_cluster$IncomeNeed)
+lines(xfit_cluster2, yfit_cluster2, col="blue", lwd=2)
+h_clara_5_cluster_3 <- hist(cluster3_bisogni_5_cluster$IncomeNeed, breaks=100, col="lightblue")
+xfit_cluster3<-seq(min(cluster3_bisogni_5_cluster$IncomeNeed),max(cluster3_bisogni_5_cluster$IncomeNeed),length=40)
+yfit_cluster3<-dnorm(xfit_cluster3,mean=mean(cluster3_bisogni_5_cluster$IncomeNeed),sd=sd(cluster3_bisogni_5_cluster$IncomeNeed))
+yfit_cluster3 <- yfit_cluster3*diff(h_clara_5_cluster_3$mids[1:2])*length(cluster3_bisogni_5_cluster$IncomeNeed)
+lines(xfit_cluster3, yfit_cluster3, col="blue", lwd=2)
+h_clara_5_cluster_4 <- hist(cluster4_bisogni_5_cluster$IncomeNeed, breaks=100, col="yellow")
+xfit_cluster4<-seq(min(cluster4_bisogni_5_cluster$IncomeNeed),max(cluster4_bisogni_5_cluster$IncomeNeed),length=40)
+yfit_cluster4<-dnorm(xfit_cluster4,mean=mean(cluster4_bisogni_5_cluster$IncomeNeed),sd=sd(cluster4_bisogni_5_cluster$IncomeNeed))
+yfit_cluster4 <- yfit_cluster4*diff(h_clara_5_cluster_4$mids[1:2])*length(cluster4_bisogni_5_cluster$IncomeNeed)
+lines(xfit_cluster4, yfit_cluster4, col="blue", lwd=2)
+h_clara_5_cluster_5 <- hist(cluster5_bisogni_5_cluster$IncomeNeed, breaks=100, col="orange")
+xfit_cluster5<-seq(min(cluster5_bisogni_5_cluster$IncomeNeed),max(cluster5_bisogni_5_cluster$IncomeNeed),length=40)
+yfit_cluster5<-dnorm(xfit_cluster5,mean=mean(cluster5_bisogni_5_cluster$IncomeNeed),sd=sd(cluster5_bisogni_5_cluster$IncomeNeed))
+yfit_cluster5 <- yfit_cluster5*diff(h_clara_5_cluster_5$mids[1:2])*length(cluster5_bisogni_5_cluster$IncomeNeed)
+lines(xfit_cluster5, yfit_cluster5, col="blue", lwd=2)
+
+test_bisogni_clusterizzati
+#andiamo a vedere i boxplot per i valori dei bisogni per i 5 clusters:
+col1 <- c("red", "orange", "lightblue", "green", "yellow")
+boxplot(test_bisogni_clusterizzati$IncomeNeed ~ test_bisogni_clusterizzati$cluster_clara_5, col = col1, main = "Boxplot IncomeNeed")
+boxplot(test_bisogni_clusterizzati$PensionNeed ~ test_bisogni_clusterizzati$cluster_clara_5, col = col1, main = "Boxplot PensionNeed")
+boxplot(test_bisogni_clusterizzati$InheritanceIndex ~ test_bisogni_clusterizzati$cluster_clara_5, col = col1, main = "Boxplot InheritanceIndex")
+boxplot(test_bisogni_clusterizzati$Age ~ test_bisogni_clusterizzati$cluster_clara_5, col = col1, main = "Boxplot Age")
+boxplot(test_bisogni_clusterizzati$etànormale ~ test_bisogni_clusterizzati$cluster_clara_5, col = col1, main = "Boxplot etànormale")
+boxplot(test_bisogni_clusterizzati$LongTermCareNeed ~ test_bisogni_clusterizzati$cluster_clara_5, col = col1, main = "Boxplot LongTermCareNeed")
+boxplot(test_bisogni_clusterizzati$ProtectionNeed ~ test_bisogni_clusterizzati$cluster_clara_5, col = col1, main = "Boxplot ProtectionNeed")
+
+#Andiamo a lavorare sul potenzialindex dei clienti:
+d_completo_con_cluster_clara_5 <- cbind(d_completo, cluster_clara_5 = clara_test_cluster_bisogni_obiettivi_5_clusters$cluster)
+d_completo_con_cluster_clara_5
+cluster1_bisogni_5_cluster_completo <- d_completo_con_cluster_clara_5[d_completo_con_cluster_clara_5$cluster_clara_5 == 1, ]
+cluster2_bisogni_5_cluster_completo <- 
+d_completo_con_cluster_clara_5[d_completo_con_cluster_clara_5$cluster_clara_5 == 2, ]
+cluster3_bisogni_5_cluster_completo <- d_completo_con_cluster_clara_5[d_completo_con_cluster_clara_5$cluster_clara_5 == 3, ]
+cluster4_bisogni_5_cluster_completo <- d_completo_con_cluster_clara_5[d_completo_con_cluster_clara_5$cluster_clara_5 == 4, ]
+cluster5_bisogni_5_cluster_completo <- d_completo_con_cluster_clara_5[d_completo_con_cluster_clara_5$cluster_clara_5 == 5, ]
+#calcolo i potential index medi dei vari clusters:
+mean(cluster1_bisogni_5_cluster_completo$ClientPotentialIndex)
+mean(cluster2_bisogni_5_cluster_completo$ClientPotentialIndex)
+mean(cluster3_bisogni_5_cluster_completo$ClientPotentialIndex)
+mean(cluster4_bisogni_5_cluster_completo$ClientPotentialIndex)
+mean(cluster5_bisogni_5_cluster_completo$ClientPotentialIndex)
+#calcolo i boxplot dei potential index dei clienti dei vari clusters:
+boxplot(d_completo_con_cluster_clara_5$ClientPotentialIndex ~ d_completo_con_cluster_clara_5$cluster_clara_5, col = col1, main = "Boxplot ClientPotentialIndex")
+
+#facciamo un ranking per quanto riguarda il clientpotentialindex:
+ranking_client_potential_per_clara_5 <- d_completo_con_cluster_clara_5[order(d_completo_con_cluster_clara_5$ClientPotentialIndex),]
+ranking_migliori_500_potential_clara_5 <- ranking_client_potential_per_clara_5[-c(1:4500),]
+table(ranking_migliori_500_potential_clara_5$cluster_clara_5)/500
+ranking_migliori_100_potential_clara_5 <- ranking_client_potential_per_clara_5[-c(1:4900),]
+barplot(table(ranking_migliori_100_potential_clara_5$cluster_clara_5)/100, col = "orange")
+sum(cluster1_bisogni_5_cluster_completo$ClientPotentialIndex)
+sum(cluster2_bisogni_5_cluster_completo$ClientPotentialIndex)
+sum(cluster3_bisogni_5_cluster_completo$ClientPotentialIndex)
+sum(cluster4_bisogni_5_cluster_completo$ClientPotentialIndex)
+sum(cluster5_bisogni_5_cluster_completo$ClientPotentialIndex)
+
+summary(cluster1_bisogni_5_cluster)
+
+#IMPORTANTE_ AGGIUNGERE L'ETA'
+#Cluster1
+cluster1_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=IncomeNeed)) +
+    geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8) +
+    ggtitle("Qual è la densità di età per cluster 1 IncomeNeed") +
+    theme_ipsum()
+cluster1_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=ProtectionNeed)) +
+    geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8) +
+    ggtitle("Qual è la densità di età per cluster 1 ProtectionNeed") +
+    theme_ipsum()
+cluster1_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=PensionNeed)) +
+    geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8) +
+    ggtitle("Qual è la densità di età per cluster 1 PensionNeed") +
+    theme_ipsum()
+cluster1_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=LongTermCareNeed)) +
+    geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8) +
+    ggtitle("Qual è la densità di età per cluster 1 LongTermCareNeed") +
+    theme_ipsum()
+cluster1_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=InheritanceIndex)) +
+    geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8) +
+    ggtitle("Qual è la densità di età per cluster 1 InheritanceIndex") +
+    theme_ipsum()
+cluster1_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8) +
+    ggtitle("Qual è la densità di età per cluster 1 Age") +
+    theme_ipsum()
+
+#CLUSTER2
+cluster2_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=IncomeNeed)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 IncomeNeed") +
+    theme_ipsum()
+cluster2_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=ProtectionNeed)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 ProtectionNeed") +
+    theme_ipsum()
+cluster2_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=PensionNeed)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 PensionNeed") +
+    theme_ipsum()
+cluster2_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=LongTermCareNeed)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 LongTermCareNeed") +
+    theme_ipsum()
+cluster2_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=InheritanceIndex)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 InheritanceIndex") +
+    theme_ipsum()
+cluster2_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 Age") +
+    theme_ipsum()
+
+#CLUSTER 3
+cluster3_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=IncomeNeed)) +
+    geom_density(fill="red", color="red", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 IncomeNeed") +
+    theme_ipsum()
+cluster3_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=ProtectionNeed)) +
+    geom_density(fill="red", color="red", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 ProtectionNeed") +
+    theme_ipsum()
+cluster3_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=PensionNeed)) +
+    geom_density(fill="red", color="red", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 PensionNeed") +
+    theme_ipsum()
+cluster3_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=LongTermCareNeed)) +
+    geom_density(fill="red", color="red", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 LongTermCareNeed") +
+    theme_ipsum()
+cluster3_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=InheritanceIndex)) +
+    geom_density(fill="red", color="red", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 InheritanceIndex") +
+    theme_ipsum()
+cluster3_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="red", color="red", alpha=0.8) +
+    ggtitle("Qual è la densità cluster3 Age") +
+    theme_ipsum()
+
+#Cluster4
+cluster4_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=IncomeNeed)) +
+    geom_density(fill="lightblue", color="lightblue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 IncomeNeed") +
+    theme_ipsum()
+cluster4_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=ProtectionNeed)) +
+    geom_density(fill="lightblue", color="lightblue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 ProtectionNeed") +
+    theme_ipsum()
+cluster4_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=PensionNeed)) +
+    geom_density(fill="lightblue", color="lightblue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 PensionNeed") +
+    theme_ipsum()
+cluster4_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=LongTermCareNeed)) +
+    geom_density(fill="lightblue", color="lightblue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 LongTermCareNeed") +
+    theme_ipsum()
+cluster4_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=InheritanceIndex)) +
+    geom_density(fill="lightblue", color="lightblue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 InheritanceIndex") +
+    theme_ipsum()
+cluster4_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="lightblue", color="lightblue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster4 Age") +
+    theme_ipsum()
+
+#Cluster5
+cluster5_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=IncomeNeed)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 IncomeNeed") +
+    theme_ipsum()
+cluster5_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=ProtectionNeed)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 ProtectionNeed") +
+    theme_ipsum()
+cluster5_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=PensionNeed)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 PensionNeed") +
+    theme_ipsum()
+cluster5_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=LongTermCareNeed)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 LongTermCareNeed") +
+    theme_ipsum()
+cluster5_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=InheritanceIndex)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 InheritanceIndex") +
+    theme_ipsum()
+cluster5_bisogni_5_cluster_completo %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 Age") +
+    theme_ipsum()
+
+```
+TEST 2 - AGE E INHERITANCEINDEX
+```{r}
+test_cluster_bisogni_obiettivi_2<- subset(d,select=c(Age, InheritanceIndex))
+test_cluster_bisogni_obiettivi_2_standardizzato <- decostand(test_cluster_bisogni_obiettivi_2, "max", MARGIN=2)
+test_cluster_bisogni_obiettivi_2_standardizzato
+summary(test_cluster_bisogni_obiettivi_2_standardizzato)
+fviz_nbclust(test_cluster_bisogni_obiettivi_2_standardizzato, clara,method ="silhouette")+theme_classic()
+
+plot(test_cluster_bisogni_obiettivi_2_standardizzato$Age ~ test_cluster_bisogni_obiettivi_2_standardizzato$InheritanceIndex, test_cluster_bisogni_obiettivi_2_standardizzato)
+
+data.frame(cor(test_cluster_bisogni_obiettivi_2_standardizzato))
+
+clara_test_cluster_bisogni_obiettivi_2 <- clara(test_cluster_bisogni_obiettivi_2_standardizzato, , metric = "manhattan", stand = FALSE, samples = 500, pamLike = FALSE)
+clara_test_cluster_bisogni_obiettivi_2
+clara_test_cluster_bisogni_obiettivi_2$clusinfo
+
+fviz_cluster(clara_test_cluster_bisogni_obiettivi_2,
+  palette = c("#00AFBB", "#FC4E07", "black", "blue", "green", "orange", "yellow", "grey", "lightblue"),
+  ellipse.type = "t",
+  ggtheme = theme_classic()
+)
+
+res_obiettivo_hopkins_2 <- get_clust_tendency(test_cluster_bisogni_obiettivi_2_standardizzato, n = nrow(test_cluster_bisogni_obiettivi_2_standardizzato)-1, graph = FALSE)
+res_obiettivo_hopkins_2$hopkins_stat
+#hopkins 0.95
+
+
+fviz_nbclust(test_cluster_bisogni_obiettivi_2_standardizzato, clara, method = c("silhouette", "wss", "gap_stat"))
+#numero ottimale 2
+# Elbow method
+fviz_nbclust(test_cluster_bisogni_obiettivi_2_standardizzato, clara, method = "wss") + geom_vline(xintercept = 9, linetype = 2) + labs(subtitle = "Elbow method")
+#3 o 4 
+# Silhouette method
+fviz_nbclust(test_cluster_bisogni_obiettivi_2_standardizzato, clara, method = "silhouette")+ labs(subtitle = "Silhouette method")
+#come prima idealmente 2
+
+km.res_obiettivi_2 <- eclust(test_cluster_bisogni_obiettivi_2_standardizzato, "kmeans", k = 2, nstart = 25, graph = FALSE)
+fviz_cluster(km.res_obiettivi_2, geom = "point", ellipse.type = "norm",
+palette = "jco", ggtheme = theme_minimal())
+hc.res_obiettivi_2 <- eclust(test_cluster_bisogni_obiettivi_2_standardizzato, "hclust", k = 2, hc_metric = "manhattan", hc_method = "ward.D2", graph = FALSE)
+fviz_dend(hc.res_obiettivi_2, show_labels = FALSE, palette = "jco", as.ggplot = TRUE)
+
+fviz_silhouette(clara_test_cluster_bisogni_obiettivi_2, palette = "jco", ggtheme = theme_classic())
+silinfo_obiettivi_2 <- clara_test_cluster_bisogni_obiettivi_2$silinfo
+names(silinfo_obiettivi_2)
+head(silinfo_obiettivi_2$widths, 10)
+silinfo_obiettivi_2$clus.avg.widths
+silinfo_obiettivi_2$avg.width
+
+km_stats_obiettivi_2 <- cluster.stats(dist(test_cluster_bisogni_obiettivi_2_standardizzato),
+                                    clara_test_cluster_bisogni_obiettivi_2$cluster)
+km_stats_obiettivi_2$dunn
+km_stats_obiettivi_2
+
+table(d$InheritanceIndex, km.res_obiettivi_2$cluster)
+
+#rivedere perchè permette dui fare dei confronti tra i risultati dei cluster:
+clara.res_obiettivi_2 <- eclust(test_cluster_bisogni_obiettivi_2_standardizzato, "clara", hc_metric = "manhattan", graph = FALSE) 
+fviz_cluster(clara.res_obiettivi_2, geom = "point", ellipse.type = "norm", palette = "jco", ggtheme = theme_minimal())
+cluster.stats(d = dist(test_cluster_bisogni_obiettivi_2_standardizzato),clara_test_cluster_bisogni_obiettivi_2$cluster, clara.res_obiettivi_2$cluster)$vi
+#vi = 0.62428
+
+
+clmethods <- c("hierarchical","pam", "clara") 
+intern_obiettivi_2 <- clValid(test_cluster_bisogni_obiettivi_2_standardizzato, nClust = 2:6, metric = "manhattan", clMethods = clmethods, validation = "internal") 
+summary(intern_obiettivi_2)
+
+stab_obiettivi_2 <- clValid(test_cluster_bisogni_obiettivi_2_standardizzato, nClust = 2:6, clMethods = clmethods, validation = "stability")
+summary(stab_obiettivi_2)
+```
+TEST 3 - SOLO BISOGNI
+```{r}
+test_cluster_bisogni_obiettivi_3<- subset(d,select=c( IncomeNeed, LongTermCareNeed, ProtectionNeed, PensionNeed, InheritanceIndex))
+test_cluster_bisogni_obiettivi_3_standardizzato <- decostand(test_cluster_bisogni_obiettivi_3, "max", MARGIN=2)
+test_cluster_bisogni_obiettivi_3_standardizzato
+summary(test_cluster_bisogni_obiettivi_3_standardizzato)
+fviz_nbclust(test_cluster_bisogni_obiettivi_3_standardizzato, clara,method ="silhouette")+theme_classic()
+
+plot(test_cluster_bisogni_obiettivi_3_standardizzato$PensionNeed ~ test_cluster_bisogni_obiettivi_3_standardizzato$InheritanceIndex, test_cluster_bisogni_obiettivi_3_standardizzato)
+
+data.frame(cor(test_cluster_bisogni_obiettivi_3_standardizzato))
+
+clara_test_cluster_bisogni_obiettivi_3 <- clara(test_cluster_bisogni_obiettivi_3_standardizzato, 6, metric = "manhattan", stand = FALSE, samples = 500, pamLike = FALSE)
+clara_test_cluster_bisogni_obiettivi_3
+clara_test_cluster_bisogni_obiettivi_3$clusinfo
+
+fviz_cluster(clara_test_cluster_bisogni_obiettivi_3,
+  palette = c("#00AFBB", "#FC4E07", "black", "blue", "green", "orange"),
+  ellipse.type = "t",
+  ggtheme = theme_classic()
+)
+
+res_obiettivo_hopkins_3 <- get_clust_tendency(test_cluster_bisogni_obiettivi_3_standardizzato, n = nrow(test_cluster_bisogni_obiettivi_3_standardizzato)-1, graph = FALSE)
+res_obiettivo_hopkins_3$hopkins_stat
+#hopkins 0.8202
+
+
+fviz_nbclust(test_cluster_bisogni_obiettivi_3_standardizzato, clara, method = c("silhouette", "wss", "gap_stat"))
+#numero ottimale 8
+# Elbow method
+fviz_nbclust(test_cluster_bisogni_obiettivi_3_standardizzato, clara, method = "wss") + geom_vline(xintercept = 6, linetype = 2) + labs(subtitle = "Elbow method")
+#6 o 8
+# Silhouette method
+fviz_nbclust(test_cluster_bisogni_obiettivi_3_standardizzato, clara, method = "silhouette")+ labs(subtitle = "Silhouette method")
+#come prima idealmente 8
+
+km.res_obiettivi_3 <- eclust(test_cluster_bisogni_obiettivi_3_standardizzato, "kmeans", k = 6, nstart = 10, graph = FALSE)
+fviz_cluster(km.res_obiettivi_3, geom = "point", ellipse.type = "norm",
+palette = "jco", ggtheme = theme_minimal())
+hc.res_obiettivi_3 <- eclust(test_cluster_bisogni_obiettivi_3_standardizzato, "hclust", k = 6, hc_metric = "manhattan", hc_method = "ward.D2", graph = FALSE)
+fviz_dend(hc.res_obiettivi_3, show_labels = FALSE, palette = "jco", as.ggplot = TRUE)
+
+fviz_silhouette(clara_test_cluster_bisogni_obiettivi_3, palette = "jco", ggtheme = theme_classic())
+silinfo_obiettivi_3 <- clara_test_cluster_bisogni_obiettivi_3$silinfo
+names(silinfo_obiettivi_3)
+head(silinfo_obiettivi_3$widths, 10)
+silinfo_obiettivi_3$clus.avg.widths
+silinfo_obiettivi_3$avg.width
+
+km_stats_obiettivi_3 <- cluster.stats(dist(test_cluster_bisogni_obiettivi_3_standardizzato),
+                                    clara_test_cluster_bisogni_obiettivi_3$cluster)
+km_stats_obiettivi_3$dunn
+#0.017645
+km_stats_obiettivi_3
+
+table(d$InheritanceIndex, km.res_obiettivi_2$cluster)
+
+#rivedere perchè permette dui fare dei confronti tra i risultati dei cluster:
+clara.res_obiettivi_3 <- eclust(test_cluster_bisogni_obiettivi_3_standardizzato, "clara", hc_metric = "manhattan", graph = FALSE) 
+fviz_cluster(clara.res_obiettivi_3, geom = "point", ellipse.type = "norm", palette = "jco", ggtheme = theme_minimal())
+cluster.stats(d = dist(test_cluster_bisogni_obiettivi_3_standardizzato),clara_test_cluster_bisogni_obiettivi_3$cluster, clara.res_obiettivi_3$cluster)$vi
+#vi = 1.18
+
+
+clmethods <- c("hierarchical","pam", "clara") 
+intern_obiettivi_3 <- clValid(test_cluster_bisogni_obiettivi_3_standardizzato, nClust = 2:9, metric = "manhattan", clMethods = clmethods, validation = "internal") 
+summary(intern_obiettivi_3) 
+#rimaniamo su 6 clusters
+
+stab_obiettivi_3 <- clValid(test_cluster_bisogni_obiettivi_3_standardizzato, nClust = 2:9, clMethods = clmethods, validation = "stability")
+summary(stab_obiettivi_2)
+#andiamo quindi a fare un clara con 6 clusters
+```
+TEST PCA
+```{r}
+test_cluster_bisogni_obiettivi_1_standardizzato
+test_cluster_bisogni_active <- test_cluster_bisogni_obiettivi_1_standardizzato[1:4500, 1:6]
+test_cluster_bisogni_active
+
+
+res.pca_bisogni <- PCA(test_cluster_bisogni_active, graph = FALSE)
+print(res.pca_bisogni)
+#il totale degli eigenvalue dovrebbe essere 6. 
+#Andiamo ad osservare i valori delle pca, in particolare possiamo osservare come la dimensione 1 spiega il 56% della variabilità, valore molto alto, e come la dimensione 2, spieghi il 15% della variabilità. Questo possiamo osservare si riflette sul nostro metodo di clustering, una volta che andiamo a rappresentare graficamente, sull'asse delle ascisse e sull'asse delle ordinate, possiamo trovare rispettivamente dimensione 2 e dimensione 1. Sappiamo quindi che tramite il cluster, a livello grafico, vengono rappresentate gli individui, spiegando il 72.65 di variabilità.
+eig.val_bisogni <- get_eigenvalue(res.pca_bisogni)
+eig.val_bisogni
+#questo per andare a vedere come si muovono gli eig.val all'interno come PCA:
+#Possiamo vedere il vertiginoso declino della dimensione 1, rispetto alle altre dimensioni. La dimensione 5 e 6 non impattano molto sulla variabilità, considerando infatti che fino alla dimensione 4 viene spiegata in totale il 93%.
+fviz_eig(res.pca_bisogni, addlabels = TRUE, ylim = c(0, 50))
+#A simple method to extract the results, for variables, from a PCA output is to use the function get_pca_var() 
+var_bisogni <- get_pca_var(res.pca_bisogni) 
+var_bisogni
+
+#questo per vedere le correlazioni tra le variabili:
+#Vedendo le correlazioni, già possiamo vedere quali variabili contribuiscono maggiormente 
+head(var_bisogni$coord)
+fviz_pca_var(res.pca_bisogni, col.var = "black")
+
+#Andiamo a vedere la square cosine, square coordinates:
+#The quality of representation of the variables on factor map is called cos2:
+#A high cos2 indicates a good representation of the variable on the principal component. In this case the variable is positioned close to the circumference of the correlation circle.
+#A low cos2 indicates that the variable is not perfectly represented by the PCs. In this case the variable is close to the center of the circle.
+#For a given variable, the sum of the cos2 on all the principal components is equal to one.
+#Andando a vedere la cos2, possiamo osservare quali sono le variabili originarie che contribuiscono maggiormente alle dimensioni. Il nostro punto di osservazioni si concentra sulla dimensione 1 e dimensione 2, che saranno quelle utilizzate per plottare i nostri grafici sui cluster.
+var_bisogni$cos2
+corrplot(var_bisogni$cos2, is.corr=TRUE)
+#Total cos2 of variables on Dim.1 and Dim.2
+#Molto utile capire quali sono le variabili che maggiormnete contribuiscono alla cos2 delle due dimensioni iniziali.
+fviz_cos2(res.pca_bisogni, choice = "var", axes = 1:2)
+#Color by cos2 values: quality on the factor map:
+#Un modo interessante per rappresentare il contributo di ogni variabile alle cos2, possiamo osservare un altro contributo di Protection Need, che osserviamo avere un andamento come correlazione piuttosto distante dalle altre variabili, osserviamo Age e InheritanceIndex, che presentano una correlazione tra di loro anche piuttosto simile.
+#Poco utili alle dimensioni 1 e 2, sono invece LongTermCareNeed, in maniera rilevante, e PensionNeed:
+fviz_pca_var(res.pca_bisogni, col.var = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), repel = TRUE)
+#Change the transparency by cos2 values
+fviz_pca_var(res.pca_bisogni, alpha.var = "cos2")
+
+
+#The larger the value of the contribution, the more the variable contributes to the component.
+#Variables that are correlated with PC1 (i.e., Dim.1) and PC2 (i.e., Dim.2) are the most important in explaining the variability in the data set.
+#Variables that do not correlated with any PC or correlated with the last dimensions are variables with low contribution and might be removed to simplify the overall analysis.
+#The larger the value of the contribution, the more the variable contributes to the component.
+#Più è alto il valore riferito ad una dimensione e più la variabile ne contribuisce maggiormente, in particolare:
+var_bisogni$contrib
+corrplot(var_bisogni$contrib, is.corr=FALSE)
+
+#Molto importante:
+# Contributions of variables to PC1
+#Alla PC1 contribuiscono molto Age, InheritanceIndex, Protection Need ed Income Need, in particolare Age ed InheritanceIndex. Le altre due variabili, contribuiscono in maniera decisamente minore, possiamo dire quindi che il contributo è abbastanza bilanciato.
+fviz_contrib(res.pca_bisogni, choice = "var", axes = 1, top = 10)
+# Contributions of variables to PC2
+#Alla PC2 vediamo che ProtectionNeed e PnesionNeed hanno un contributo maggiore rispetto alle altre variabili, in particolare ProtectionNeed, presenta un contributo decisamente importante, pari all'88% da come abbiamo visto in precedenza:
+fviz_contrib(res.pca_bisogni, choice = "var", axes = 2, top = 10)
+#Per quanto contribuiscono in totale:
+#Definitivo vediamo quanto contribuiscono in maniera totale le variabili, come potevamo immaginare dalle conclusioni precedenti, LongTermCareneed e IncomeNeed non sono molto rilevanti per la nostra classificazione in cluster, infatti, se volessimo effettuare una clusterizzazione, senza considerare il 100% di variabilità, potremmo rimuovere queste due variabili, rutenut
+fviz_contrib(res.pca_bisogni, choice = "var", axes = 1:2, top = 10)
+#potremmo togliere income need e longtermcareneed volendo.
+
+fviz_pca_var(res.pca_bisogni, col.var = "contrib",
+gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+)
+
+# Create a grouping variable using kmeans
+# Create 3 groups of variables (centers = 3) set.seed(123)
+res.km_obiettivi_pca <- kmeans(var_bisogni$coord, centers = 3, nstart = 500) 
+grp_bisogni_pca <- as.factor(res.km_obiettivi_pca$cluster)
+# Color variables by groups
+fviz_pca_var(res.pca_bisogni, col.var = grp_bisogni_pca, palette = c("#0073C2FF", "#EFC000FF", "#868686FF"),
+legend.title = "Cluster")
+
+# Description of dimension 1
+res.desc_pca <- dimdesc(res.pca_bisogni, axes = c(1,2), proba = 0.05) 
+res.desc_pca$Dim.1
+#Description of dimension 2
+res.desc_pca$Dim.2
+
+fviz_contrib(res.pca_bisogni, choice = "ind", axes = 1:2)
+
+bisogni.pca_test_1 <- PCA(test_cluster_bisogni_obiettivi_1_standardizzato, graph = FALSE)
+fviz_pca_ind(bisogni.pca_test_1, geom.ind = "point", 
+palette = c("#00AFBB", "#FC4E07", "black", "blue", "green", "orange", "yellow", "grey", "lightblue"), addEllipses = TRUE,  legend.title = "Groups"
+)
+
+#Valori degli individui:
+ind_bisogni <- get_pca_ind(res.pca_bisogni) 
+ind_bisogni
+#The fviz_pca_ind() is used to produce the graph of individuals. To create a simple plot, type this:
+fviz_pca_ind(res.pca_bisogni)
+fviz_pca_ind(res.pca_bisogni, col.ind = "cos2",
+gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+repel = TRUE )
+test_per_pca <- test_bisogni_clusterizzati[,1:8]
+test_per_pca
+test_pca_def <- test_per_pca[,-7]
+test_pca_def
+bisogni.pca_bisogni <- PCA(test_pca_def[,-7], graph = FALSE)
+bisogni.pca_bisogni
+as.factor(test_pca_def$cluster_clara_5)
+fviz_pca_ind(bisogni.pca_bisogni,
+geom.ind = "point", col.ind = test_pca_def$cluster_clara_5, 
+palette = c("#00AFBB", "#E7B800", "#FC4E07", "black", "lightblue"), addEllipses = TRUE, legend.title = "Groups")
+
+
+fviz_pca_var(res.pca_bisogni, axes = c(2, 3))
+fviz_pca_ind(res.pca_bisogni, axes = c(2, 3))
+
+
+```
+ADVANCED CLUSTERING CON I BISOGNI DEI CLIENTI
+```{r}
+test_cluster_bisogni_obiettivi_1_standardizzato
+#hkmeans con 5 clusters:
+res.hk_clustering_bisogni_5_clusters <-hkmeans(test_cluster_bisogni_obiettivi_1_standardizzato, 5)
+names(res.hk_clustering_bisogni_5_clusters)
+res.hk_clustering_bisogni_5_clusters$size
+res.hk_clustering_bisogni_5_clusters
+fviz_cluster(res.hk_clustering_bisogni_5_clusters, palette = "jco", repel = TRUE, ggtheme = theme_classic())
+
+#fuzzy clustering:
+fuzzy_bisogni_5_clusters <- fanny(test_cluster_bisogni_obiettivi_1_standardizzato, 5, metric = "manhattan", stand = FALSE)
+head(fuzzy_bisogni_5_clusters$membership, 10)
+fuzzy_bisogni_5_clusters$coeff
+fviz_cluster(fuzzy_bisogni_5_clusters, ellipse.type = "norm", repel = FALSE,
+palette = "jco", ggtheme = theme_minimal(), legend = "right")
+fviz_silhouette(fuzzy_bisogni_5_clusters, palette = "jco", ggtheme = theme_minimal())
+
+#density-based:
+library("MASS") 
+library("ggpubr")
+ggscatter(test_cluster_bisogni_obiettivi_1_standardizzato, x = "IncomeNeed", y = "ProtectionNeed")+geom_density2d() 
+
+#vediamo altre considerazioni sui parametri:
+#model based clustering:
+library("mclust")
+mc_bisogni_clustering <- Mclust(test_cluster_bisogni_obiettivi_1_standardizzato) 
+summary(mc_bisogni_clustering)
+# BIC values used for choosing the number of clusters 
+fviz_mclust(mc_bisogni_clustering, "BIC", palette = "jco")
+# Classification: plot showing the clustering 
+fviz_mclust(mc_bisogni_clustering, "classification", geom = "point",
+pointsize = 1.5, palette = "jco") 
+# Classification uncertainty
+fviz_mclust(mc_bisogni_clustering, "uncertainty", palette = "jco")
+
+#density-based clustering:
+km.res_bisogni_clustering_density <- kmeans(test_cluster_bisogni_obiettivi_1_standardizzato, 5, nstart = 500)
+fviz_cluster(km.res_bisogni_clustering_density, test_cluster_bisogni_obiettivi_1_standardizzato, geom = "point", ellipse= FALSE, show.clust.cent = FALSE, palette = "jco", ggtheme = theme_classic())
+
+```
+$$ANALISI DNA FINANZIARIO DEL CLIENTE$$
+```{r}
+dnafinanziario <- subset(d, select = c(Age, RiskPropension, PortfolioRisk, ClientInvestmentHorizon, PortfolioHorizon, ClientKnowledgeExperience, ClientPotentialIndex, IncomeHighLow))
+dnafinanziario_standard <- decostand(dnafinanziario, "max",MARGIN=2)
+summary(dnafinanziario_standard)
+data.frame(cor(dnafinanziario_standard))
+plot(dnafinanziario_standard)
+
+#attenzione! Attributo "IncomeHighlOW" è di tipo binario 
+fviz_nbclust(dnafinanziario_standard, clara, method = "wss") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Elbow method") #numero ottiamle 4 
+
+set.seed(123)
+fviz_nbclust(dnafinanziario_standard, kmeans, nstart = 25, method = "gap_stat", nboot = 50)+
+labs(subtitle = "Gap statistic method") #numero ottimale 10
+#NUMERO OTTIMALE DI CLUSTER 5 
+
+#ANDIAMO AD EFFETTUARE IL CLUSTER CON METODO CLARA:
+clara.res_dna_finanziario <-clara(dnafinanziario_standard, 5, metric = "manhattan", stand = FALSE,
+samples = 500, pamLike = FALSE)
+clara.res_dna_finanziario$medoids
+fviz_cluster(clara.res_dna_finanziario,palette =c("red","green","violet","yellow","black"),ellipse.type ="t", geom="point", pointsize = 1 ,ggtheme =theme_classic())
+
+#Hopkins del dataset del dna finanziario:
+hopkins(dnafinanziario_standard, n = nrow(dnafinanziario_standard)-1)
+#esce 0.071090
+
+#andiamo a vedere la silhouette per i vari metodi:
+#Andiamo a vedere che esce 2 come cluster consigliato.
+fviz_nbclust(dnafinanziario_standard, clara, method = "silhouette") + labs(subtitle = "kmeans e silhouette")
+#utilizziamo pam e silhouette: (anche in questo caso 2)
+fviz_nbclust(dnafinanziario_standard, pam, method = "silhouette") + labs(subtitle = "pam e silhouette method")
+#utilizziamo hcut e silhouette:
+#(esce come ottimo 9)
+fviz_nbclust(test_cluster_bisogni_obiettivi_1_standardizzato, hcut, method = "silhouette") + labs(subtitle = "hcut e silhouette method")
+
+#Elbow:
+fviz_nbclust(dnafinanziario_standard, clara, method = "wss") + geom_vline(xintercept = 5, linetype = 2) + labs(subtitle = "clara e wss method")
+
+# Gap statistic
+# nboot = 50 to keep the function speedy.
+# recommended value: nboot= 500 for your analysis.
+# Use verbose = FALSE to hide computing progression.
+set.seed(123)
+fviz_nbclust(dnafinanziario_standard, clara, nstart = 25, method = "gap_stat", nboot = 50) +labs(subtitle = "Gap statistic method")
+
+#Analisi degli indici interni:
+intern_obiettivi_dna_finanziario <- clValid(dnafinanziario_standard, nClust = 2:8, metric = "manhattan", clMethods = clmethods, validation = "internal") 
+summary(intern_obiettivi_dna_finanziario)
+
+#analisi degli indici con la stability:
+stab_obiettivi_dna_finanziario <- clValid(dnafinanziario_standard, nClust = 2:8,metric = "manhattan", clMethods = clmethods, validation = "stability")
+summary(stab_obiettivi_dna_finanziario)
+
+#Andiamo ad inserire i risultati dei cluster nel dataset
+test_dnacliente_clusterizzati<- cbind(dnafinanziario_standard, cluster = clara.res_dna_finanziario$cluster, clienti = d$ClientID, etanormale = d$Age)
+head(test_dnacliente_clusterizzati)
+table(d$Age, test_dnacliente_clusterizzati$cluster)
+
+test_datiinvestimenti_clusterizzati
+cluster1_dnafinanziario_5_cluster <- test_dnacliente_clusterizzati[test_dnacliente_clusterizzati$cluster == 1, ]
+cluster1_dnafinanziario_5_cluster
+cluster2_dnafinanziario_5_cluster <- test_dnacliente_clusterizzati[test_dnacliente_clusterizzati$cluster == 2, ]
+cluster2_dnafinanziario_5_cluster
+cluster3_dnafinanziario_5_cluster <- test_dnacliente_clusterizzati[test_dnacliente_clusterizzati$cluster == 3, ]
+cluster3_dnafinanziario_5_cluster
+cluster4_dnafinanziario_5_cluster <- test_dnacliente_clusterizzati[test_dnacliente_clusterizzati$cluster == 4, ]
+cluster4_dnafinanziario_5_cluster
+cluster5_dnafinanziario_5_cluster <- test_dnacliente_clusterizzati[test_dnacliente_clusterizzati$cluster == 5, ]
+cluster5_dnafinanziario_5_cluster
+cluster6_dnafinanziario_5_cluster <- test_dnacliente_clusterizzati[test_dnacliente_clusterizzati$cluster == 6, ]
+cluster6_dnafinanziario_5_cluster
+
+cluster1_dnafinanziario_5_cluster
+#Variabili: Age, RiskPropension, PortfolioRisk, ClientInvestmentHorizon, PortfolioHorizon, ClientKnowledgeExperience, ClientPotentialIndex, IncomeHighLow
+#Andiamo a vedere le densità dele variabili del cluster1:
+cluster1_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 1 Age") +
+    theme_ipsum()
+cluster1_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=RiskPropension)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 1 RiskPropension") +
+    theme_ipsum()
+cluster1_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=ClientInvestmentHorizon)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 1 ClientInvestmenteHorizon") +
+    theme_ipsum()
+cluster1_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=ClientKnowledgeExperience)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 1 ClientKnowledgeExperience") +
+    theme_ipsum()
+cluster1_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=ClientPotentialIndex)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 1 ClientPotentialIndex") +
+    theme_ipsum()
+cluster1_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=PortfolioRisk)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 1 PortfolioRisk") +
+    theme_ipsum()
+cluster1_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=PortfolioHorizon)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 1 PortfolioHorizon") +
+    theme_ipsum()
+cluster1_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=IncomeHighLow)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 1 dna finanziario IncomeHighLow") +
+    theme_ipsum()
+
+#Andiamo a vedere le densità dele variabili del cluster2:
+cluster2_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 Age") +
+    theme_ipsum()
+cluster2_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=RiskPropension)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 RiskPropension") +
+    theme_ipsum()
+cluster2_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=ClientInvestmentHorizon)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 ClientInvestmentHorizon") +
+    theme_ipsum()
+cluster2_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=ClientKnowledgeExperience)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 ClientKnowledgeExperience") +
+    theme_ipsum()
+cluster2_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=ClientPotentialIndex)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 ClientPotentialIndex") +
+    theme_ipsum()
+cluster2_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=PortfolioRisk)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 PortfolioRisk") +
+    theme_ipsum()
+cluster2_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=PortfolioHorizon)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 PortfolioHorizon") +
+    theme_ipsum()
+cluster2_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=IncomeHighLow)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 IncomeHighLow") +
+    theme_ipsum()
+table(cluster2_dnafinanziario_5_cluster$IncomeHighLow)
+
+#Andiamo a vedere le densità dele variabili del cluster3:
+cluster3_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="yellow", color="yellow", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 Age") +
+    theme_ipsum()
+cluster3_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=RiskPropension)) +
+    geom_density(fill="yellow", color="yellow", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 RiskPropension") +
+    theme_ipsum()
+cluster3_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=ClientInvestmentHorizon)) +
+    geom_density(fill="yellow", color="yellow", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 ClientInvestmentHorizon") +
+    theme_ipsum()
+cluster3_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=ClientKnowledgeExperience)) +
+    geom_density(fill="yellow", color="yellow", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 ClientKnowledgeExperience") +
+    theme_ipsum()
+cluster3_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=ClientPotentialIndex)) +
+    geom_density(fill="yellow", color="yellow", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 ClientPotentialIndex") +
+    theme_ipsum()
+cluster3_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=PortfolioRisk)) +
+    geom_density(fill="yellow", color="yellow", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 PortfolioRisk") +
+    theme_ipsum()
+cluster3_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=PortfolioHorizon)) +
+    geom_density(fill="yellow", color="yellow", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 PortfolioHorizon") +
+    theme_ipsum()
+cluster3_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=IncomeHighLow)) +
+    geom_density(fill="yellow", color="yellow", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 IncomeHighLow") +
+    theme_ipsum()
+table(cluster3_dnafinanziario_5_cluster$IncomeHighLow)
+
+#Andiamo a vedere le densità dele variabili del cluster4:
+cluster4_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="red", color="red", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 Age") +
+    theme_ipsum()
+cluster4_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=RiskPropension)) +
+    geom_density(fill="red", color="red", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 RiskPropension") +
+    theme_ipsum()
+cluster4_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=ClientInvestmentHorizon)) +
+    geom_density(fill="red", color="red", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 ClientInvestmenteHorizon") +
+    theme_ipsum()
+cluster4_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=ClientKnowledgeExperience)) +
+    geom_density(fill="red", color="red", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 ClientKnowledgeExperience") +
+    theme_ipsum()
+cluster4_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=ClientPotentialIndex)) +
+    geom_density(fill="red", color="red", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 ClientPotentialIndex") +
+    theme_ipsum()
+cluster4_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=PortfolioRisk)) +
+    geom_density(fill="red", color="red", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 PortofioRisk") +
+    theme_ipsum()
+cluster4_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=PortfolioHorizon)) +
+    geom_density(fill="red", color="red", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 PortfolioHorizon") +
+    theme_ipsum()
+cluster4_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=IncomeHighLow)) +
+    geom_density(fill="red", color="red", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 IncomeHighLow") +
+    theme_ipsum()
+table(cluster4_dnafinanziario_5_cluster$IncomeHighLow)
+
+#Andiamo a vedere le densità delle variabili del cluster5:
+cluster5_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="blue", color="blue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 Age") +
+    theme_ipsum()
+cluster5_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=RiskPropension)) +
+    geom_density(fill="blue", color="blue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 RiskPropension") +
+    theme_ipsum()
+cluster5_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=ClientInvestmentHorizon)) +
+    geom_density(fill="blue", color="blue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 ClientInvestmentHorizon") +
+    theme_ipsum()
+cluster5_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=ClientKnowledgeExperience)) +
+    geom_density(fill="blue", color="blue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 ClientKnowledgeExperience") +
+    theme_ipsum()
+cluster5_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=ClientPotentialIndex)) +
+    geom_density(fill="blue", color="blue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 ClientPotentialIndex") +
+    theme_ipsum()
+cluster5_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=PortfolioRisk)) +
+    geom_density(fill="blue", color="blue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 PortfolioRisk") +
+    theme_ipsum()
+cluster5_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=PortfolioHorizon)) +
+    geom_density(fill="blue", color="blue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 Portfolio Horizon") +
+    theme_ipsum()
+cluster5_dnafinanziario_5_cluster %>%
+  ggplot( aes(x=IncomeHighLow)) +
+    geom_density(fill="blue", color="blue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 IncomeHighLow") +
+    theme_ipsum()
+table(cluster5_dnafinanziario_5_cluster$IncomeHighLow)
+
+test_dnacliente_clusterizzati
+#Boxplot delle variabili dei 5 cluster creati:
+col2 <- c("red", "orange", "lightblue", "green", "yellow", "black", "blue", "brown", "grey")
+boxplot(test_dnacliente_clusterizzati$RiskPropension ~ test_dnacliente_clusterizzati$cluster, col = col2, main = "Boxplot IncomeNeed")
+boxplot(test_dnacliente_clusterizzati$PortfolioRisk ~ test_dnacliente_clusterizzati$cluster, col = col2, main = "Boxplot PensionNeed")
+boxplot(test_dnacliente_clusterizzati$ClientInvestmentHorizon ~ test_dnacliente_clusterizzati$cluster, col = col2, main = "Boxplot InheritanceIndex")
+boxplot(test_dnacliente_clusterizzati$Age ~ test_dnacliente_clusterizzati$cluster, col = col2, main = "Boxplot Age")
+boxplot(test_dnacliente_clusterizzati$PortfolioHorizon ~ test_dnacliente_clusterizzati$cluster, col = col2, main = "Boxplot etànormale")
+boxplot(test_dnacliente_clusterizzati$ClientKnowledgeExperience ~ test_dnacliente_clusterizzati$cluster, col = col2, main = "Boxplot LongTermCareNeed")
+boxplot(test_dnacliente_clusterizzati$ClientPotentialIndex ~ test_dnacliente_clusterizzati$cluster, col = col2, main = "Boxplot ProtectionNeed")
+boxplot(test_dnacliente_clusterizzati$IncomeHighLow ~ test_dnacliente_clusterizzati$cluster, col = col2, main = "Boxplot ProtectionNeed")
+boxplot(test_dnacliente_clusterizzati$etanormale ~ test_dnacliente_clusterizzati$cluster, col = col2, main = "Boxplot ProtectionNeed")
+
+#Andiamo a lavorare sul potenzialindex dei clienti:
+d_completo_con_cluster_clara_5_dnafinanziario <- cbind(d_completo, cluster_clara_5_dnafinanziario = clara.res_dna_finanziario$cluster)
+d_completo_con_cluster_clara_5_dnafinanziario
+cluster1_dnafinanziario_5_cluster_completo <- d_completo_con_cluster_clara_5_dnafinanziario[d_completo_con_cluster_clara_5_dnafinanziario$cluster_clara_5 == 1, ]
+cluster2_dnafinanziario_5_cluster_completo <- 
+d_completo_con_cluster_clara_5_dnafinanziario[d_completo_con_cluster_clara_5_dnafinanziario$cluster_clara_5 == 2, ]
+cluster3_dnafinanziario_5_cluster_completo <- d_completo_con_cluster_clara_5_dnafinanziario[d_completo_con_cluster_clara_5_dnafinanziario$cluster_clara_5 == 3, ]
+cluster4_dnafinanziario_5_cluster_completo <- d_completo_con_cluster_clara_5_dnafinanziario[d_completo_con_cluster_clara_5_dnafinanziario$cluster_clara_5 == 4, ]
+cluster5_dnafinanziario_5_cluster_completo <- d_completo_con_cluster_clara_5_dnafinanziario[d_completo_con_cluster_clara_5_dnafinanziario$cluster_clara_5 == 5, ]
+#calcolo i potential index medi dei vari clusters:
+mean(cluster1_dnafinanziario_5_cluster_completo$ClientPotentialIndex)
+mean(cluster2_dnafinanziario_5_cluster_completo$ClientPotentialIndex)
+mean(cluster3_dnafinanziario_5_cluster_completo$ClientPotentialIndex)
+mean(cluster4_dnafinanziario_5_cluster_completo$ClientPotentialIndex)
+mean(cluster5_dnafinanziario_5_cluster_completo$ClientPotentialIndex)
+#calcolo i boxplot dei potential index dei clienti dei vari clusters:
+boxplot(d_completo_con_cluster_clara_5_dnafinanziario$ClientPotentialIndex ~ d_completo_con_cluster_clara_5_dnafinanziario$cluster_clara_5_dnafinanziario, col = col1, main = "Boxplot ClientPotentialIndex")
+
+#facciamo un ranking per quanto riguarda il clientpotentialindex:
+ranking_client_potential_per_clara_5_dna_finanziario <- d_completo_con_cluster_clara_5_dnafinanziario[order(d_completo_con_cluster_clara_5_dnafinanziario$ClientPotentialIndex),]
+ranking_migliori_500_potential_clara_5_dna_finanziario <- ranking_client_potential_per_clara_5_dna_finanziario[-c(1:4500),]
+ranking_migliori_500_potential_clara_5_dna_finanziario
+table(ranking_migliori_500_potential_clara_5_dna_finanziario$cluster_clara_5_dnafinanziario)/500
+ranking_migliori_100_potential_clara_5_dna_finanziario <- ranking_client_potential_per_clara_5_dna_finanziario[-c(1:4900),]
+table(ranking_migliori_100_potential_clara_5_dna_finanziario$cluster_clara_5_dnafinanziario)/100
+sum(cluster1_dnafinanziario_5_cluster_completo$ClientPotentialIndex)/length(cluster1_dnafinanziario_5_cluster_completo)
+sum(cluster2_dnafinanziario_5_cluster_completo$ClientPotentialIndex)/length(cluster2_dnafinanziario_5_cluster_completo)
+sum(cluster3_dnafinanziario_5_cluster_completo$ClientPotentialIndex)/length(cluster3_dnafinanziario_5_cluster_completo)
+sum(cluster4_dnafinanziario_5_cluster_completo$ClientPotentialIndex)/length(cluster4_dnafinanziario_5_cluster_completo)
+sum(cluster5_dnafinanziario_5_cluster_completo$ClientPotentialIndex)/length(cluster5_dnafinanziario_5_cluster_completo)
+
+#Andiamo a vedere la densità del RiskPropension, nei vari cluster:
+h_clara_5_cluster_1_dna_finanziario_risk <- hist(cluster1_dnafinanziario_5_cluster$RiskPropension, breaks=100, col="red")
+xfit_cluster1_dna_finanziario_risk<-seq(min(cluster1_dnafinanziario_5_cluster$RiskPropension),max(cluster1_dnafinanziario_5_cluster$RiskPropension),length=40)
+yfit_cluster1_dna_finanziario_risk<-dnorm(xfit_cluster1_dna_finanziario_risk,mean=mean(cluster1_dnafinanziario_5_cluster$RiskPropension),sd=sd(cluster1_dnafinanziario_5_cluster$RiskPropension))
+yfit_cluster1_dna_finanziario_risk <- yfit_cluster1_dna_finanziario_risk*diff(h_clara_5_cluster_1_dna_finanziario_risk$mids[1:2])*length(cluster1_dnafinanziario_5_cluster$RiskPropension)
+lines(xfit_cluster1_dna_finanziario_risk, yfit_cluster1_dna_finanziario_risk, col="blue", lwd=2)
+h_clara_5_cluster_2_dna_finanziario_risk <- hist(cluster2_dnafinanziario_5_cluster$RiskPropension, breaks=100, col="green")
+xfit_cluster2_dna_finanziario_risk<-seq(min(cluster2_dnafinanziario_5_cluster$RiskPropension),max(cluster2_dnafinanziario_5_cluster$RiskPropension),length=40)
+yfit_cluster2_dna_finanziario_risk<-dnorm(xfit_cluster2_dna_finanziario_risk,mean=mean(cluster2_dnafinanziario_5_cluster$RiskPropension),sd=sd(cluster2_dnafinanziario_5_cluster$RiskPropension))
+yfit_cluster2_dna_finanziario_risk <- yfit_cluster2_dna_finanziario_risk*diff(h_clara_5_cluster_2_dna_finanziario_risk$mids[1:2])*length(cluster2_dnafinanziario_5_cluster$RiskPropension)
+lines(xfit_cluster2_dna_finanziario_risk, yfit_cluster2_dna_finanziario_risk, col="blue", lwd=2)
+h_clara_5_cluster_3_dna_finanziario_risk <- hist(cluster3_dnafinanziario_5_cluster$RiskPropension, breaks=100, col="yellow")
+xfit_cluster3_dna_finanziario_risk<-seq(min(cluster3_dnafinanziario_5_cluster$RiskPropension),max(cluster3_dnafinanziario_5_cluster$RiskPropension),length=40)
+yfit_cluster3_dna_finanziario_risk<-dnorm(xfit_cluster3_dna_finanziario_risk,mean=mean(cluster3_dnafinanziario_5_cluster$RiskPropension),sd=sd(cluster3_dnafinanziario_5_cluster$RiskPropension))
+yfit_cluster3_dna_finanziario_risk <- yfit_cluster3_dna_finanziario_risk*diff(h_clara_5_cluster_3_dna_finanziario_risk$mids[1:2])*length(cluster3_dnafinanziario_5_cluster$RiskPropension)
+lines(xfit_cluster3_dna_finanziario_risk, yfit_cluster3_dna_finanziario_risk, col="blue", lwd=2)
+h_clara_5_cluster_4_dna_finanziario_risk <- hist(cluster4_dnafinanziario_5_cluster$RiskPropension, breaks=100, col="orange")
+xfit_cluster4_dna_finanziario_risk<-seq(min(cluster4_dnafinanziario_5_cluster$RiskPropension),max(cluster4_dnafinanziario_5_cluster$RiskPropension),length=40)
+yfit_cluster4_dna_finanziario_risk<-dnorm(xfit_cluster4_dna_finanziario_risk,mean=mean(cluster4_dnafinanziario_5_cluster$RiskPropension),sd=sd(cluster4_dnafinanziario_5_cluster$RiskPropension))
+yfit_cluster4_dna_finanziario_risk <- yfit_cluster4_dna_finanziario_risk*diff(h_clara_5_cluster_4_dna_finanziario_risk$mids[1:2])*length(cluster4_dnafinanziario_5_cluster$RiskPropension)
+lines(xfit_cluster4_dna_finanziario_risk, yfit_cluster4_dna_finanziario_risk, col="blue", lwd=2)
+h_clara_5_cluster_5_dna_finanziario_risk <- hist(cluster5_dnafinanziario_5_cluster$RiskPropension, breaks=100, col="lightblue")
+xfit_cluster5_dna_finanziario_risk<-seq(min(cluster5_dnafinanziario_5_cluster$RiskPropension),max(cluster5_dnafinanziario_5_cluster$RiskPropension),length=40)
+yfit_cluster5_dna_finanziario_risk<-dnorm(xfit_cluster5_dna_finanziario_risk,mean=mean(cluster5_dnafinanziario_5_cluster$RiskPropension),sd=sd(cluster5_dnafinanziario_5_cluster$RiskPropension))
+yfit_cluster5_dna_finanziario_risk <- yfit_cluster5_dna_finanziario_risk*diff(h_clara_5_cluster_5_dna_finanziario_risk$mids[1:2])*length(cluster5_dnafinanziario_5_cluster$RiskPropension)
+lines(xfit_cluster5_dna_finanziario_risk, yfit_cluster5_dna_finanziario_risk, col="blue", lwd=2)
+
+##Andiamo a vedere la densità del ClientKnowledgeExperience, nei vari cluster:
+h_clara_5_cluster_1_dna_finanziario_ClientKnowledgeExperience <- hist(cluster1_dnafinanziario_5_cluster$ClientKnowledgeExperience, breaks=100, col="red")
+xfit_cluster1_dna_finanziario_ClientKnowledgeExperience<-seq(min(cluster1_dnafinanziario_5_cluster$ClientKnowledgeExperience),max(cluster1_dnafinanziario_5_cluster$ClientKnowledgeExperience),length=40)
+yfit_cluster1_dna_finanziario_ClientKnowledgeExperience<-dnorm(xfit_cluster1_dna_finanziario_ClientKnowledgeExperience,mean=mean(cluster1_dnafinanziario_5_cluster$ClientKnowledgeExperience),sd=sd(cluster1_dnafinanziario_5_cluster$ClientKnowledgeExperience))
+yfit_cluster1_dna_finanziario_ClientKnowledgeExperience <- yfit_cluster1_dna_finanziario_ClientKnowledgeExperience*diff(h_clara_5_cluster_1_dna_finanziario_ClientKnowledgeExperience$mids[1:2])*length(cluster1_dnafinanziario_5_cluster$ClientKnowledgeExperience)
+lines(xfit_cluster1_dna_finanziario_ClientKnowledgeExperience, yfit_cluster1_dna_finanziario_ClientKnowledgeExperience, col="blue", lwd=2)
+h_clara_5_cluster_2_dna_finanziario_risk <- hist(cluster2_dnafinanziario_5_cluster$RiskPropension, breaks=100, col="green")
+xfit_cluster2_dna_finanziario_risk<-seq(min(cluster2_dnafinanziario_5_cluster$RiskPropension),max(cluster2_dnafinanziario_5_cluster$RiskPropension),length=40)
+yfit_cluster2_dna_finanziario_risk<-dnorm(xfit_cluster2_dna_finanziario_risk,mean=mean(cluster2_dnafinanziario_5_cluster$RiskPropension),sd=sd(cluster2_dnafinanziario_5_cluster$RiskPropension))
+yfit_cluster2_dna_finanziario_risk <- yfit_cluster2_dna_finanziario_risk*diff(h_clara_5_cluster_2_dna_finanziario_risk$mids[1:2])*length(cluster2_dnafinanziario_5_cluster$RiskPropension)
+lines(xfit_cluster2_dna_finanziario_risk, yfit_cluster2_dna_finanziario_risk, col="blue", lwd=2)
+h_clara_5_cluster_3_dna_finanziario_risk <- hist(cluster3_dnafinanziario_5_cluster$RiskPropension, breaks=100, col="yellow")
+xfit_cluster3_dna_finanziario_risk<-seq(min(cluster3_dnafinanziario_5_cluster$RiskPropension),max(cluster3_dnafinanziario_5_cluster$RiskPropension),length=40)
+yfit_cluster3_dna_finanziario_risk<-dnorm(xfit_cluster3_dna_finanziario_risk,mean=mean(cluster3_dnafinanziario_5_cluster$RiskPropension),sd=sd(cluster3_dnafinanziario_5_cluster$RiskPropension))
+yfit_cluster3_dna_finanziario_risk <- yfit_cluster3_dna_finanziario_risk*diff(h_clara_5_cluster_3_dna_finanziario_risk$mids[1:2])*length(cluster3_dnafinanziario_5_cluster$RiskPropension)
+lines(xfit_cluster3_dna_finanziario_risk, yfit_cluster3_dna_finanziario_risk, col="blue", lwd=2)
+h_clara_5_cluster_4_dna_finanziario_risk <- hist(cluster4_dnafinanziario_5_cluster$RiskPropension, breaks=100, col="orange")
+xfit_cluster4_dna_finanziario_risk<-seq(min(cluster4_dnafinanziario_5_cluster$RiskPropension),max(cluster4_dnafinanziario_5_cluster$RiskPropension),length=40)
+yfit_cluster4_dna_finanziario_risk<-dnorm(xfit_cluster4_dna_finanziario_risk,mean=mean(cluster4_dnafinanziario_5_cluster$RiskPropension),sd=sd(cluster4_dnafinanziario_5_cluster$RiskPropension))
+yfit_cluster4_dna_finanziario_risk <- yfit_cluster4_dna_finanziario_risk*diff(h_clara_5_cluster_4_dna_finanziario_risk$mids[1:2])*length(cluster4_dnafinanziario_5_cluster$RiskPropension)
+lines(xfit_cluster4_dna_finanziario_risk, yfit_cluster4_dna_finanziario_risk, col="blue", lwd=2)
+h_clara_5_cluster_5_dna_finanziario_risk <- hist(cluster5_dnafinanziario_5_cluster$RiskPropension, breaks=100, col="lightblue")
+xfit_cluster5_dna_finanziario_risk<-seq(min(cluster5_dnafinanziario_5_cluster$RiskPropension),max(cluster5_dnafinanziario_5_cluster$RiskPropension),length=40)
+yfit_cluster5_dna_finanziario_risk<-dnorm(xfit_cluster5_dna_finanziario_risk,mean=mean(cluster5_dnafinanziario_5_cluster$RiskPropension),sd=sd(cluster5_dnafinanziario_5_cluster$RiskPropension))
+yfit_cluster5_dna_finanziario_risk <- yfit_cluster5_dna_finanziario_risk*diff(h_clara_5_cluster_5_dna_finanziario_risk$mids[1:2])*length(cluster5_dnafinanziario_5_cluster$RiskPropension)
+lines(xfit_cluster5_dna_finanziario_risk, yfit_cluster5_dna_finanziario_risk, col="blue", lwd=2)
+
+
+```
+$$ANALISI.INVESTIMENTI.EFFETTUATI$$
+```{r}
+dati_investimenti<- subset(d, select = c(Age, BondInvestments,EquityInvestments, MoneyMarketInvestments, OtherInvestments, Cash,AuM))
+dati_investimenti_standard <- decostand(dati_investimenti, "max",MARGIN=2)
+summary(dati_investimenti_standard)
+data.frame(cor(dati_investimenti_standard))
+plot(dati_investimenti_standard)
+
+fviz_nbclust(dati_investimenti_standard, clara, method = "wss") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Elbow method") #numero ottiamle 6
+
+fviz_nbclust(dati_investimenti_standard, clara, method = "silhouette") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "“silhouette") #numero ottimale 2 
+
+set.seed(123)
+fviz_nbclust(dati_investimenti_standard, kmeans, nstart = 25, method = "gap_stat", nboot = 50)+
+labs(subtitle = "Gap statistic method") #numero ottimale 10
+
+#Andiamo a trovare clara 5, per rendere più agevole il match degli investimenti:
+clara.res_dati_investimenti <-clara(dati_investimenti_standard, 5, metric = "manhattan", stand = FALSE,
+samples = 500, pamLike = FALSE)
+clara.res_dati_investimenti$medoids
+fviz_cluster(clara.res_dati_investimenti,palette =c("red","green","violet","yellow","black"),ellipse.type ="t", geom="point", pointsize = 1 ,ggtheme =theme_classic())
+
+
+test_datiinvestimenti_clusterizzati <- cbind(dati_investimenti_standard, cluster = clara.res_dati_investimenti$cluster, clienti = d$ClientID, etanormale = d$Age)
+head(test_datiinvestimenti_clusterizzati)
+table(d$Age, test_datiinvestimenti_clusterizzati$cluster)
+
+#Analisi degli indici interni:
+intern_obiettivi_dati_investimenti <- clValid(dati_investimenti_standard, nClust = 2:8, metric = "manhattan", clMethods = clmethods, validation = "internal") 
+summary(intern_obiettivi_dati_investimenti)
+
+#analisi degli indici con la stability:
+stab_obiettivi_dati_investimenti <- clValid(dati_investimenti_standard, nClust = 2:8,metric = "manhattan", clMethods = clmethods, validation = "stability")
+summary(stab_obiettivi_dati_investimenti)
+
+#Hopkins del dataset dei dati degli investimenti:
+hopkins(dati_investimenti_standard, n = nrow(dati_investimenti_standard)-1)
+#esce 0.0506
+
+#andiamo a vedere la silhouette per i vari metodi:
+#Andiamo a vedere che esce 2 come cluster consigliato.
+fviz_nbclust(dati_investimenti_standard, clara, method = "silhouette") + labs(subtitle = "kmeans e silhouette")
+#utilizziamo pam e silhouette: (anche in questo caso 2)
+fviz_nbclust(dati_investimenti_standard, pam, method = "silhouette") + labs(subtitle = "pam e silhouette method")
+#utilizziamo hcut e silhouette:
+#(esce come ottimo 2)
+fviz_nbclust(dati_investimenti_standard, hcut, method = "silhouette") + labs(subtitle = "hcut e silhouette method")
+
+#Elbow:
+#(possiamo scegliere tra 5 e 6)
+fviz_nbclust(dati_investimenti_standard, clara, method = "wss") + geom_vline(xintercept = 5, linetype = 2) + labs(subtitle = "clara e wss method")
+
+# Gap statistic
+# nboot = 50 to keep the function speedy.
+# recommended value: nboot= 500 for your analysis.
+# Use verbose = FALSE to hide computing progression.
+set.seed(123)
+fviz_nbclust(dati_investimenti_standard, clara, nstart = 25, method = "gap_stat", nboot = 50) +labs(subtitle = "Gap statistic method")
+
+table(test_datiinvestimenti_clusterizzati$cluster)
+test_datiinvestimenti_clusterizzati
+cluster1_investimenti_6_cluster <- test_datiinvestimenti_clusterizzati[test_datiinvestimenti_clusterizzati$cluster == 1, ]
+cluster1_investimenti_6_cluster
+cluster2_investimenti_6_cluster <- test_datiinvestimenti_clusterizzati[test_datiinvestimenti_clusterizzati$cluster == 2, ]
+cluster2_investimenti_6_cluster
+cluster3_investimenti_6_cluster <- test_datiinvestimenti_clusterizzati[test_datiinvestimenti_clusterizzati$cluster == 3, ]
+cluster3_investimenti_6_cluster
+cluster4_investimenti_6_cluster <- test_datiinvestimenti_clusterizzati[test_datiinvestimenti_clusterizzati$cluster == 4, ]
+cluster4_investimenti_6_cluster
+cluster5_investimenti_6_cluster <- test_datiinvestimenti_clusterizzati[test_datiinvestimenti_clusterizzati$cluster == 5, ]
+cluster5_investimenti_6_cluster
+cluster6_investimenti_6_cluster <- test_datiinvestimenti_clusterizzati[test_datiinvestimenti_clusterizzati$cluster == 6, ]
+cluster6_investimenti_6_cluster
+
+#Andiamo a rappresentare la densità:
+h_clara_6_cluster_1_investimenti <- hist(cluster1_investimenti_6_cluster$Age, breaks=100, col="red")
+xfit_cluster1_investimenti<-seq(min(cluster1_investimenti_6_cluster$Age),max(cluster1_investimenti_6_cluster$Age),length=40)
+yfit_cluster1_investimenti<-dnorm(xfit_cluster1_investimenti,mean=mean(cluster1_investimenti_6_cluster$Age),sd=sd(cluster1_investimenti_6_cluster$Age))
+yfit_cluster1_investimenti <- yfit_cluster1_investimenti*diff(h_clara_6_cluster_1_investimenti$mids[1:2])*length(cluster1_investimenti_6_cluster$Age)
+lines(xfit_cluster1_investimenti, yfit_cluster1_investimenti, col="blue", lwd=2)
+h_clara_6_cluster_2_investimenti <- hist(cluster2_investimenti_6_cluster$Age, breaks=100, col="green")
+xfit_cluster2_investimenti<-seq(min(cluster2_investimenti_6_cluster$Age),max(cluster2_investimenti_6_cluster$Age),length=40)
+yfit_cluster2_investimenti<-dnorm(xfit_cluster2_investimenti,mean=mean(cluster2_investimenti_6_cluster$Age),sd=sd(cluster2_investimenti_6_cluster$Age))
+yfit_cluster2_investimenti <- yfit_cluster2_investimenti*diff(h_clara_6_cluster_2_investimenti$mids[1:2])*length(cluster2_investimenti_6_cluster$Age)
+lines(xfit_cluster2_investimenti, yfit_cluster2_investimenti, col="blue", lwd=2)
+h_clara_5_cluster_3 <- hist(cluster3_bisogni_5_cluster$IncomeNeed, breaks=100, col="lightblue")
+xfit_cluster3<-seq(min(cluster3_bisogni_5_cluster$IncomeNeed),max(cluster3_bisogni_5_cluster$IncomeNeed),length=40)
+yfit_cluster3<-dnorm(xfit_cluster3,mean=mean(cluster3_bisogni_5_cluster$IncomeNeed),sd=sd(cluster3_bisogni_5_cluster$IncomeNeed))
+yfit_cluster3 <- yfit_cluster3*diff(h_clara_5_cluster_3$mids[1:2])*length(cluster3_bisogni_5_cluster$IncomeNeed)
+lines(xfit_cluster3, yfit_cluster3, col="blue", lwd=2)
+h_clara_5_cluster_4 <- hist(cluster4_bisogni_5_cluster$IncomeNeed, breaks=100, col="yellow")
+xfit_cluster4<-seq(min(cluster4_bisogni_5_cluster$IncomeNeed),max(cluster4_bisogni_5_cluster$IncomeNeed),length=40)
+yfit_cluster4<-dnorm(xfit_cluster4,mean=mean(cluster4_bisogni_5_cluster$IncomeNeed),sd=sd(cluster4_bisogni_5_cluster$IncomeNeed))
+yfit_cluster4 <- yfit_cluster4*diff(h_clara_5_cluster_4$mids[1:2])*length(cluster4_bisogni_5_cluster$IncomeNeed)
+lines(xfit_cluster4, yfit_cluster4, col="blue", lwd=2)
+h_clara_5_cluster_5 <- hist(cluster5_bisogni_5_cluster$IncomeNeed, breaks=100, col="orange")
+xfit_cluster5<-seq(min(cluster5_bisogni_5_cluster$IncomeNeed),max(cluster5_bisogni_5_cluster$IncomeNeed),length=40)
+yfit_cluster5<-dnorm(xfit_cluster5,mean=mean(cluster5_bisogni_5_cluster$IncomeNeed),sd=sd(cluster5_bisogni_5_cluster$IncomeNeed))
+yfit_cluster5 <- yfit_cluster5*diff(h_clara_5_cluster_5$mids[1:2])*length(cluster5_bisogni_5_cluster$IncomeNeed)
+lines(xfit_cluster5, yfit_cluster5, col="blue", lwd=2)
+
+
+
+#PARTE FATTA DA GABRI:
+test_investimenti_clusterizzati<- cbind(dati_investimenti_standard, cluster_clara_5 = test_datiinvestimenti_clusterizzati$cluster,clienti = d$ClientID, etanormale = d$Age)
+head(test_investimenti_clusterizzati)
+
+#Creo dei cluster con solo i clienti appartenenti a quel determinato cluster:
+cluster1_investimenti_5_cluster <- test_investimenti_clusterizzati[test_investimenti_clusterizzati$cluster_clara_5 == 1, ]
+cluster1_investimenti_5_cluster
+cluster2_investimenti_5_cluster <- test_investimenti_clusterizzati[test_investimenti_clusterizzati$cluster_clara_5 == 2, ]
+cluster2_investimenti_5_cluster
+cluster3_investimenti_5_cluster <- test_investimenti_clusterizzati[test_investimenti_clusterizzati$cluster_clara_5 == 3, ]
+cluster3_investimenti_5_cluster
+cluster4_investimenti_5_cluster <- test_investimenti_clusterizzati[test_investimenti_clusterizzati$cluster_clara_5 == 4, ]
+cluster4_investimenti_5_cluster
+cluster5_investimenti_5_cluster <- test_investimenti_clusterizzati[test_investimenti_clusterizzati$cluster_clara_5 == 5, ]
+cluster5_investimenti_5_cluster
+
+#Vediamo i range di età:
+print("cluster 1 range età:")
+range(cluster1_investimenti_5_cluster$etanormale)
+print("cluster 2 range età:")
+range(cluster2_investimenti_5_cluster$etanormale)
+print("cluster 3 range età:")
+range(cluster3_investimenti_5_cluster$etanormale)
+print("cluster 4 range età:")
+range(cluster4_investimenti_5_cluster$etanormale)
+print("cluster 5 range età:")
+range(cluster5_investimenti_5_cluster$etanormale)
+
+#range dei cluster per BondInvestments:
+print("cluster 1 range BondInvestments:")
+range(cluster1_investimenti_5_cluster$BondInvestments)
+print("cluster 2 range BondInvestments:")
+range(cluster2_investimenti_5_cluster$BondInvestments)
+print("cluster 3 range BondInvestments:")
+range(cluster3_investimenti_5_cluster$BondInvestments)
+print("cluster 4 range BondInvestments:")
+range(cluster4_investimenti_5_cluster$BondInvestments)
+print("cluster 5 range BondInvestments:")
+range(cluster5_investimenti_5_cluster$BondInvestments)
+
+#range EquityInvestments per ogni cluster:
+print("cluster 1 range EquityInvestments:")
+range(cluster1_investimenti_5_cluster$EquityInvestments)
+print("cluster 2 range EquityInvestments:")
+range(cluster2_investimenti_5_cluster$EquityInvestments)
+print("cluster 3 range EquityInvestments:")
+range(cluster3_investimenti_5_cluster$EquityInvestments)
+print("cluster 4 range EquityInvestments:")
+range(cluster4_investimenti_5_cluster$EquityInvestments)
+print("cluster 5 range EquityInvestments:")
+range(cluster5_investimenti_5_cluster$EquityInvestments)
+
+#range MoneyMarketInvestments per ogni cluster:
+print("cluster 1 range MoneyMarketInvestments:")
+range(cluster1_investimenti_5_cluster$MoneyMarketInvestments)
+print("cluster 2 range MoneyMarketInvestments:")
+range(cluster2_investimenti_5_cluster$MoneyMarketInvestments)
+print("cluster 3 range MoneyMarketInvestments:")
+range(cluster3_investimenti_5_cluster$MoneyMarketInvestments)
+print("cluster 4 range MoneyMarketInvestments:")
+range(cluster4_investimenti_5_cluster$MoneyMarketInvestments)
+print("cluster 5 range MoneyMarketInvestments:")
+range(cluster5_investimenti_5_cluster$MoneyMarketInvestments)
+
+#range OtherInvestments per ogni cluster:
+print("cluster 1 range OtherInvestments:")
+range(cluster1_investimenti_5_cluster$OtherInvestments)
+print("cluster 2 range OtherInvestments:")
+range(cluster2_investimenti_5_cluster$OtherInvestments)
+print("cluster 3 range OtherInvestments:")
+range(cluster3_investimenti_5_cluster$OtherInvestments)
+print("cluster 4 range OtherInvestments:")
+range(cluster4_investimenti_5_cluster$OtherInvestments)
+print("cluster 5 range OtherInvestments:")
+range(cluster5_investimenti_5_cluster$OtherInvestments)
+
+#range Cash per ogni cluster:
+print("cluster 1 range Cash:")
+range(cluster1_investimenti_5_cluster$Cash)
+print("cluster 2 range Cash:")
+range(cluster2_investimenti_5_cluster$Cash)
+print("cluster 3 range Cash:")
+range(cluster3_investimenti_5_cluster$Cash)
+print("cluster 4 range Cash:")
+range(cluster4_investimenti_5_cluster$Cash)
+print("cluster 5 range Cash:")
+range(cluster5_investimenti_5_cluster$Cash)
+
+#range AuM per ogni cluster:
+print("cluster 1 range AuM:")
+range(cluster1_investimenti_5_cluster$AuM)
+print("cluster 2 range AuM:")
+range(cluster2_investimenti_5_cluster$AuM)
+print("cluster 3 range AuM:")
+range(cluster3_investimenti_5_cluster$AuM)
+print("cluster 4 range AuM:")
+range(cluster4_investimenti_5_cluster$AuM)
+print("cluster 5 range AuM:")
+range(cluster5_investimenti_5_cluster$AuM)
+
+#Andiamo a vedere la densità rappresentata:
+par(mfrow=c(3,2))
+h_clara_5_cluster_1 <- hist(cluster1_investimenti_5_cluster$EquityInvestments, breaks=100, col="red")
+xfit<-seq(min(cluster1_investimenti_5_cluster$EquityInvestments),max(cluster1_investimenti_5_cluster$EquityInvestments),length=40)
+yfit<-dnorm(xfit,mean=mean(cluster1_investimenti_5_cluster$EquityInvestments),sd=sd(cluster1_investimenti_5_cluster$EquityInvestments))
+yfit <- yfit*diff(h_clara_5_cluster_1$mids[1:2])*length(cluster1_investimenti_5_cluster$EquityInvestments)
+lines(xfit, yfit, col="blue", lwd=2)
+
+h_clara_5_cluster_2 <- hist(cluster2_investimenti_5_cluster$EquityInvestments, breaks=100, col="green")
+xfit<-seq(min(cluster2_investimenti_5_cluster$EquityInvestments),max(cluster2_investimenti_5_cluster$EquityInvestments),length=40)
+yfit<-dnorm(xfit,mean=mean(cluster2_investimenti_5_cluster$EquityInvestments),sd=sd(cluster2_investimenti_5_cluster$EquityInvestments))
+yfit <- yfit*diff(h_clara_5_cluster_2$mids[1:2])*length(cluster2_investimenti_5_cluster$EquityInvestments)
+lines(xfit, yfit, col="blue", lwd=2)
+h_clara_5_cluster_3 <- hist(cluster3_investimenti_5_cluster$EquityInvestments, breaks=100, col="lightblue")
+xfit<-seq(min(cluster3_investimenti_5_cluster$EquityInvestments),max(cluster3_investimentii_5_cluster$EquityInvestments),length=40)
+yfit<-dnorm(xfit,mean=mean(cluster3_investimenti_5_cluster$EquityInvestments),sd=sd(cluster3_investimenti_5_cluster$EquityInvestments))
+yfit <- yfit*diff(h_clara_5_cluster_3$mids[1:2])*length(cluster3_investimenti_5_cluster$EquityInvestments)
+lines(xfit, yfit, col="blue", lwd=2)
+h_clara_5_cluster_4 <- hist(cluster4_investimenti_5_cluster$EquityInvestments, breaks=100, col="yellow")
+xfit<-seq(min(cluster4_invetimenti_5_cluster$EquityInvestments),max(cluster4_investimentii_5_cluster$EquityInvestments),length=40)
+
+ 
+
+yfit<-dnorm(xfit,mean=mean(cluster4_investimenti_5_cluster$EquityInvestments),sd=sd(cluster4_investimenti_5_cluster$EquityInvestments))
+yfit <- yfit*diff(h_clara_5_cluster_4$mids[1:2])*length(cluster4_investimenti_5_cluster$EquityInvestments)
+lines(xfit, yfit, col="blue", lwd=2)
+h_clara_5_cluster_5 <- hist(cluster5_investimenti_5_cluster$EquityInvestments, breaks=100, col="orange")
+xfit<-seq(min(cluster5_investimenti_5_cluster$EquityInvestments),max(cluster5_investimenti_5_cluster$EquityInvestments),length=40)
+yfit<-dnorm(xfit,mean=mean(cluster5_investimenti_5_cluster$EquityInvestments),sd=sd(cluster5_investimenti_5_cluster$EquityInvestments))
+yfit <- yfit*diff(h_clara_5_cluster_5$mids[1:2])*length(cluster5_investimenti_5_cluster$EquityInvestments)
+lines(xfit, yfit, col="blue", lwd=2)
+
+#andiamo a vedere i boxplot per i valori dei bisogni per i 5 clusters:
+col1 <- c("red", "orange", "lightblue", "green", "yellow")
+boxplot(test_investimenti_clusterizzati$EquityInvestments ~ test_investimenti_clusterizzati$cluster_clara_5, col = col1, main = "Boxplot BondInvestments")
+boxplot(test_investimenti_clusterizzati$BondInvestments ~ test_investimenti_clusterizzati$cluster_clara_5, col = col1, main = "Boxplot MoneyMarketInvestments")
+boxplot(test_investimenti_clusterizzati$MoneyMarketInvestments ~ test_investimenti_clusterizzati$cluster_clara_5, col = col1, main = "Boxplot OtherInvestments")
+boxplot(test_investimenti_clusterizzati$OtherInvestments ~ test_investimenti_clusterizzati$cluster_clara_5, col = col1, main = "Boxplot OtherInvestments")
+boxplot(test_investimenti_clusterizzati$etanormale ~ test_bisogni_clusterizzati$cluster_clara_5, col = col1, main = "Boxplot etànormale")
+boxplot(test_investimenti_clusterizzati$Cash ~ test_investimenti_clusterizzati$cluster_clara_5, col = col1, main = "Boxplot Cash")
+boxplot(test_investimenti_clusterizzati$AuM ~ test_investimenti_clusterizzati$cluster_clara_5, col = col1, main = "Boxplot AuM")
+
+#Andiamo a vedere le densità delle variabili del cluster 1:
+cluster1_investimenti_5_cluster %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="blue", color="blue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 1 Age") +
+    theme_ipsum()
+cluster1_investimenti_5_cluster %>%
+  ggplot( aes(x=BondInvestments)) +
+    geom_density(fill="blue", color="blue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 1 BondInvestments") +
+    theme_ipsum()
+cluster1_investimenti_5_cluster %>%
+  ggplot( aes(x=EquityInvestments)) +
+    geom_density(fill="blue", color="blue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 1 EquityInvestments") +
+    theme_ipsum()
+cluster1_investimenti_5_cluster %>%
+  ggplot( aes(x=MoneyMarketInvestments)) +
+    geom_density(fill="blue", color="blue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 1 MoneyMarketInvestments") +
+    theme_ipsum()
+cluster1_investimenti_5_cluster %>%
+  ggplot( aes(x=OtherInvestments)) +
+    geom_density(fill="blue", color="blue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 1 OtherInvestments") +
+    theme_ipsum()
+cluster1_investimenti_5_cluster %>%
+  ggplot( aes(x=Cash)) +
+    geom_density(fill="blue", color="blue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 1 Cash") +
+    theme_ipsum()
+cluster1_investimenti_5_cluster%>%
+  ggplot( aes(x=AuM)) +
+    geom_density(fill="blue", color="blue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster1 AuM") +
+    theme_ipsum()
+
+#Andiamo a vedere le densità delle variabili del cluster 2:
+cluster2_investimenti_5_cluster %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 Age") +
+    theme_ipsum()
+cluster2_investimenti_5_cluster %>%
+  ggplot( aes(x=BondInvestments)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 BondInvestments") +
+    theme_ipsum()
+cluster2_investimenti_5_cluster %>%
+  ggplot( aes(x=EquityInvestments)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 EquityInvestments") +
+    theme_ipsum()
+cluster2_investimenti_5_cluster %>%
+  ggplot( aes(x=MoneyMarketInvestments)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 MoneyMarketInvestments") +
+    theme_ipsum()
+cluster2_investimenti_5_cluster %>%
+  ggplot( aes(x=OtherInvestments)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 OtherInvestments") +
+    theme_ipsum()
+cluster2_investimenti_5_cluster %>%
+  ggplot( aes(x=Cash)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 Cash") +
+    theme_ipsum()
+cluster2_investimenti_5_cluster %>%
+  ggplot( aes(x=AuM)) +
+    geom_density(fill="orange", color="orange", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 2 AuM") +
+    theme_ipsum()
+
+#Andiamo a vedere le densità delle variabili del cluster 3:
+cluster3_investimenti_5_cluster %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 Age") +
+    theme_ipsum()
+cluster3_investimenti_5_cluster %>%
+  ggplot( aes(x=BondInvestments)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 BondInvestments") +
+    theme_ipsum()
+cluster3_investimenti_5_cluster %>%
+  ggplot( aes(x=EquityInvestments)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 EquityInvestments") +
+    theme_ipsum()
+cluster3_investimenti_5_cluster %>%
+  ggplot( aes(x=MoneyMarketInvestments)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 MoneyMarketInvestments") +
+    theme_ipsum()
+cluster3_investimenti_5_cluster %>%
+  ggplot( aes(x=OtherInvestments)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 OtherInvestments") +
+    theme_ipsum()
+cluster3_investimenti_5_cluster %>%
+  ggplot( aes(x=Cash)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 Cash") +
+    theme_ipsum()
+cluster3_investimenti_5_cluster %>%
+  ggplot( aes(x=AuM)) +
+    geom_density(fill="green", color="green", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 3 AuM") +
+    theme_ipsum()
+
+#Andiamo a vedere le densità delle variabili del cluster 4:
+cluster4_investimenti_5_cluster %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="lightblue", color="lightblue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 Age") +
+    theme_ipsum()
+cluster4_investimenti_5_cluster %>%
+  ggplot( aes(x=BondInvestments)) +
+    geom_density(fill="lightblue", color="lightblue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 BondInvestments") +
+    theme_ipsum()
+cluster4_investimenti_5_cluster %>%
+  ggplot( aes(x=EquityInvestments)) +
+    geom_density(fill="lightblue", color="lightblue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 EquityInvestments") +
+    theme_ipsum()
+cluster4_investimenti_5_cluster %>%
+  ggplot( aes(x=MoneyMarketInvestments)) +
+    geom_density(fill="lightblue", color="lightblue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 MoneyMarketInvestments") +
+    theme_ipsum()
+cluster4_investimenti_5_cluster %>%
+  ggplot( aes(x=OtherInvestments)) +
+    geom_density(fill="lightblue", color="lightblue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 OtherInvestments") +
+    theme_ipsum()
+cluster4_investimenti_5_cluster %>%
+  ggplot( aes(x=Cash)) +
+    geom_density(fill="lightblue", color="lightblue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 Cash") +
+    theme_ipsum()
+cluster4_investimenti_5_cluster %>%
+  ggplot( aes(x=AuM)) +
+    geom_density(fill="lightblue", color="lightblue", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 4 AuM") +
+    theme_ipsum()
+
+#Andiamo a vedere le densità delle variabili del cluster 4:
+cluster5_investimenti_5_cluster %>%
+  ggplot( aes(x=Age)) +
+    geom_density(fill="black", color="black", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 Age") +
+    theme_ipsum()
+cluster5_investimenti_5_cluster %>%
+  ggplot( aes(x=BondInvestments)) +
+    geom_density(fill="black", color="black", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 BondInvestments") +
+    theme_ipsum()
+cluster5_investimenti_5_cluster %>%
+  ggplot( aes(x=EquityInvestments)) +
+    geom_density(fill="black", color="black", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 EquityInvestments") +
+    theme_ipsum()
+cluster5_investimenti_5_cluster %>%
+  ggplot( aes(x=MoneyMarketInvestments)) +
+    geom_density(fill="black", color="black", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 MoneyMarketInvestments") +
+    theme_ipsum()
+cluster5_investimenti_5_cluster %>%
+  ggplot( aes(x=OtherInvestments)) +
+    geom_density(fill="black", color="black", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 OtherInvestments") +
+    theme_ipsum()
+cluster5_investimenti_5_cluster %>%
+  ggplot( aes(x=Cash)) +
+    geom_density(fill="black", color="black", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 Cash") +
+    theme_ipsum()
+cluster5_investimenti_5_cluster %>%
+  ggplot( aes(x=AuM)) +
+    geom_density(fill="black", color="black", alpha=0.8) +
+    ggtitle("Qual è la densità cluster 5 AuM") +
+    theme_ipsum()
+
+```
+
+$$ANALISI MATCHING CLUSTERING$$
+```{r}
+d_con_cluster <- cbind(d, cluster_clara_5 = clara_test_cluster_bisogni_obiettivi_5_clusters$cluster, cluster_dna_finanziario = clara.res_dati_investimenti$cluster, cluster_analisi_investimenti = clara.res_dna_finanziario$cluster)
+d_con_cluster
+d_con_cluster_finito <- d_con_cluster[,9:36]
+#Notiamo la presenza per i bisogni dei clust
+#Andiamo ad effettuare un plot per vedere le assegnazioni dei cluster dei bisogni degli utenti, con i cluster degli investimenti che sono stati trovati:
+#Possiamo osservare che sull'asse verticale troviamo i cluster dei bisogni, mentre sull'asse orizzontale troviamo i cluster degli investimenti. Per il cluster 1 dei bisogni, l'assegnazione al cluster 1 degli investimenti è praticamente netta, come ad indicare che generalmente ai clienti con un profilo simile di bisogno come cluster1, vengono assegnati degli investimenti con composizione simile al cluster1 degli investimenti. 
+#Osservando il cluster2 dei bisogni, notiamo un binomio di investimento tra il cluster 2 e 3 degli investimenti, anche se il cluster 3 degli investimenti risultati più numeroso; da notare comunque la presenza di di cluter 1 e 5 tra i matching, anche se in misura nettamente minore.
+#Per il cluster 3 dei bisogni, notiamo una certa, non perfetta, omogeneità di investimento con il cluster 1,2 e 3 degli investimenti
+#Per il cluster 4 dei bisogni, notiamo una certa corrispondenza con il cluster 4 degli investimenti, possiamo dire che generalmente i clienti che hanno dei bisogni simili al cluster 4 dei bisogni, presentano degli investimenti simili corrispondenti al cluster 4 degli investimenti.
+#Per il cluster 5 dei bisogni, possiamo notare 3 particolari cluster di investimento ai quali si riferiscono, ossia il 2,3,4, anche se il cluster 4 presenta una più alta numerosità.
+#Si può quindi concludere come 3 cluster dei bisogni, corrispondono maggiormente a 3 strategie di investimento, mentre per 2 cluster dei bisogni, le strategie di investimento sono piuttosto varie, quindi si consiglia di creare una soluzione maggiormente ad hoc per quanto riguarda
+table(d_con_cluster_finito$cluster_clara_5, d_con_cluster_finito$cluster_analisi_investimenti)
+#Cluster 1:
+length(which(d_con_cluster_finito$cluster_clara_5 == 1))
+687 * 100 / 818 #86.98% corrispondenza al cluster maggiore degli investimenti;
+#Cluster 2:
+length(which(d_con_cluster_finito$cluster_clara_5 == 2))
+866 *100 / 1810 #47% corrispondenza al cluster maggiore degli investimenti;
+#Cluster 3:
+length(which(d_con_cluster_finito$cluster_clara_5 == 3))
+235 * 100 / 663 #35% corrispondenza al cluster maggiore degli investimenti;
+#Cluster 4:
+length(which(d_con_cluster_finito$cluster_clara_5 == 4))
+704 * 100 / 1074 #65% di corrisondenza al cluster maggiore degli investimenti;
+#Cluster 5:
+length(which(d_con_cluster_finito$cluster_clara_5 == 5))
+285 * 100 / 635 #44% di corrispondenza al cluster maggiore degli investimenti
+
+
+#Sull'asse verticale abbiamo il dna finanziario dei clienti suddiviso in cluster, mentre sull'asse orizzontale degli investimenti, abbiamo il cluster dei diversi investimenti:
+#Al cluster 1 del dna finanziario, corrispondono 3 maggiori tipologie di investimento nel cluster 2,3 e 4
+#Il cluster 2 del dna finanziario presenta una certa omogeneità per quanto riguardai cluster di investimento proposti.
+#Per il cluster 3 del dna finanziario, si ripete la situazione come il cluster 2, ossia è presenta una non perfetta omogenetià dei cluster di investimento, con una maggioranza verso il cluster 1 e 3.
+#Per il cluster 4 del dna finanziario, notiamo la presenza di tre cluster di investimento maggiormente rilevanti, ossia i cluster 1, 2 e 3, comunque è abbastanza omogenea la distribuzione.
+#Per il cluster 5 del dna finanziario, notiamo la presenza di omogeneità, con il cluster 3 e 4 preferiti con un maggior numero di corrispondenza. Da notare come il cluster 5 degli investimenti è quasi o nulla compotabile.
+#Possiamo concludere dicendo come il dna finanzario non è ottimo per determinare la tipologia di investimento sulla quale andare ad investire, mentre per ora sono i bisogni degli utenti l'aspetto principale che rende una maggiore differenziazione per quanto riguarda la tipologia di investimenti da effettuare.
+table(d_con_cluster_finito$cluster_dna_finanziario, d_con_cluster_finito$cluster_analisi_investimenti)
+#Cluster 1:
+length(which(d_con_cluster_finito$cluster_dna_finanziario == 1))
+529 * 100 / 1716 #30.82% corrispondenza al cluster maggiore degli investimenti;
+#Cluster 2:
+length(which(d_con_cluster_finito$cluster_dna_finanziario == 2))
+234 *100 / 579 #40.41% corrispondenza al cluster maggiore degli investimenti;
+#Cluster 3:
+length(which(d_con_cluster_finito$cluster_dna_finanziario == 3))
+186 * 100 / 523 #35.56% corrispondenza al cluster maggiore degli investimenti;
+#Cluster 4:
+length(which(d_con_cluster_finito$cluster_dna_finanziario == 4))
+301 * 100 / 1061 #28.36% di corrisondenza al cluster maggiore degli investimenti;
+#Cluster 5:
+length(which(d_con_cluster_finito$cluster_dna_finanziario == 5))
+310 * 100 / 1121 #27.65% di corrispondenza al cluster maggiore degli investimenti
+
+#Sull'asse verticale abbiamo i cluster dei bisogni, mentre sullì'asse orizzontale abbiamo i cluster del dna finanziario:
+#Per il cluster 1 dei bisogni dei clienti, abbiamo come un livello piuttosto omogeneo per quanto riguarda il dna finanziario, non è quindi possibile in questo caso associare dei bisogni ad un certo dna finanziario;
+#Per il cluster 2 dei bisogni possiamo notare due cluster di dna finanziario che sono maggiormente presenti,in particolare i cluster 1 e 4, quindi una certa differenza tra dna finanziari presente tra il cluster dei bisogni.
+#Per il cluster 3 dei bisogni, notiamo anche in questo caso una omogeneità nel dna di investimento con i clsuter 1, 3 e 5, ma decisamente diverso rispetto al cluster 4 degli investimewnti;
+#Per il cluster 4 dei bisogni, possiamo osservare la presenza di una maaggioranza di corrispondenza nel cluster 1 degli investimenti, considerando comunque che anche nei confronti del cluster 4 e 5 c'è un'elevata presenza di corrispondenza.
+#Per il cluster 5 possiamo notare la presenza di una corrispondenza per quanto riguarda il cluster 1 del dna finanziario, ma anche in questo caso, solo in due cluster non vi è la presenza di corrispondenza rilevante.
+#Possiamo concludere dicendo che solamente nei cluster 2 e 4 dei bisogni, vi è una corrispondenza marcata con i cluster del dna finanziario, mentre per gli altri cluster dei bisogni dei clienti, non abbiamo una corrispondenza marcata, anzi, abbiamo una corrispondenza piuttosto omogenea, anche se non perfetta.
+table(d_con_cluster_finito$cluster_clara_5, d_con_cluster_finito$cluster_dna_finanziario)
+#Cluster 1:
+length(which(d_con_cluster_finito$cluster_clara_5 == 1))
+206 * 100 / 818 #25.18% corrispondenza al cluster maggiore del dna finanziario;
+#Cluster 2:
+length(which(d_con_cluster_finito$cluster_clara_5 == 2))
+664 *100 / 1818 #36.52% corrispondenza al cluster maggiore del dna finanziario;
+#Cluster 3:
+length(which(d_con_cluster_finito$cluster_clara_5 == 3))
+231 * 100 / 663 #34.84% corrispondenza al cluster maggiore del dna finanziario;
+#Cluster 4:
+length(which(d_con_cluster_finito$cluster_clara_5 == 4))
+487 * 100 / 1074 #45.34% di corrisondenza al cluster maggiore del dna finanziario;
+#Cluster 5:
+length(which(d_con_cluster_finito$cluster_clara_5 == 5))
+278 * 100 / 635 #43.77% di corrispondenza al cluster maggiore del dna finanziario
+```
+$$TEST CLUSTER 1 DEI BISOGNI CON IL CLUSTER DEGLI INVESTIMENTI$$
+```{r}
+d_con_cluster
+d_con_cluster_investimenti <- subset(d_con_cluster,select=c(Age, BondInvestments,EquityInvestments, MoneyMarketInvestments, OtherInvestments, Cash, cluster_clara_5))
+d_con_cluster_investimenti_cluster_1 <- d_con_cluster_investimenti[d_con_cluster_investimenti$cluster_clara_5 == 1,]
+d_con_cluster_investimenti_cluster_1
+d_con_cluster_investimenti_cluster_1_no_clara <- subset(d_con_cluster_investimenti_cluster_1,select=c(Age, BondInvestments,EquityInvestments, MoneyMarketInvestments, OtherInvestments, Cash))
+d_con_cluster_investimenti_cluster_1_no_clara
+d_con_cluster_investimenti_cluster_1_no_clara_standard  <- decostand(d_con_cluster_investimenti_cluster_1_no_clara, "max", MARGIN=2)
+d_con_cluster_investimenti_cluster_1_no_clara_standard
+
+#Cluster 5 con clara
+clara_d_investimenti_per_il_cluster_1 <- clara(d_con_cluster_investimenti_cluster_1_no_clara_standard, 5, metric = "manhattan", stand = FALSE, samples = 500, pamLike = FALSE)
+clara_d_investimenti_per_il_cluster_1$clusinfo
+fviz_cluster(clara_d_investimenti_per_il_cluster_1,
+  palette = c("#00AFBB", "#FC4E07", "black", "blue", "green"),
+  ellipse.type = "t",
+  ggtheme = theme_classic()
+)
+clara_d_investimenti_per_il_cluster_1$medoids
+
+```
+
+STUDIO REGRESSIONE RISK PROPENSION
+```{r}
+dataset_portfolio$ESTREME <- 1 
+dataset_portfolio$ESTREME[c(FIND_EXTREME_OBSERVARION(dataset_portfolio$PortfolioRisk,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$PortfolioHorizon,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$BondInvestments,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$EquityInvestments,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$MoneyMarketInvestments,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$OtherInvestments,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$Cash,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$AuM,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$Age,2))] <- 2
+
+d_noout <- dataset_portfolio[-c(FIND_EXTREME_OBSERVARION(dataset_portfolio$PortfolioRisk,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$PortfolioHorizon,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$BondInvestments,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$EquityInvestments,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$MoneyMarketInvestments,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$OtherInvestments,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$Cash,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$AuM,2),FIND_EXTREME_OBSERVARION(dataset_portfolio$Age,2)),]
+
+summary(d_noout)
+
+```
+
+```{r}
+#-- White test function
+white.test <- function(lmod,data=d){
+  u2 <- lmod$residuals^2
+  y <- fitted(lmod)
+  Ru2 <- summary(lm(u2 ~ y + I(y^2)))$r.squared
+  LM <- nrow(data)*Ru2
+  p.value <- 1-pchisq(LM, 2)
+  data.frame("Test statistic"=LM,"P value"=p.value)
+}
+
+#-- funzione per ottenere osservazioni outlier univariate
+FIND_EXTREME_OBSERVARION <- function(x,sd_factor=2){
+  which(x>mean(x)+sd_factor*sd(x) | x<mean(x)-sd_factor*sd(x))
+}
+library(pander)
+library(car)
+library(olsrr)
+library(systemfit)
+library(het.test)
+panderOptions('knitr.auto.asis', FALSE)
+library(Hmisc)
+library(lmtest)
+library(sjstats)
+library(plotrix)
+library(sjPlot)
+library(sjmisc)
+library(lme4)
+library(ppcor)
+```
+
+
+```{r pressure}
+dataset_portfolio <- subset(d, select = c(PortfolioRisk, PortfolioHorizon, BondInvestments,EquityInvestments, MoneyMarketInvestments, OtherInvestments, Cash,Age,AuM,RiskPropension))
+
+VAR_NUMERIC <- c("PortfolioRisk","PortfolioHorizon","BondInvestments","EquityInvestments","MoneyMarketInvestments","OtherInvestments", "Cash", "Age", "AuM", "RiskPropension")
+summary(dataset_portfolio[,VAR_NUMERIC])
+plot(dataset_portfolio)
+
+#analizzo con e senza outlier
+mod1 <- lm(PortfolioRisk ~  Cash + BondInvestments + EquityInvestments + MoneyMarketInvestments + OtherInvestments + AuM+ Age, dataset_portfolio)
+mod2 <- lm(PortfolioRisk ~  Cash + BondInvestments + EquityInvestments + MoneyMarketInvestments + OtherInvestments + AuM+ Age, d_noout)
+
+mod3<- lm(PortfolioRisk ~   BondInvestments + EquityInvestments + MoneyMarketInvestments + OtherInvestments + AuM+ Age, dataset_portfolio)
+
+summary(mod3)
+anova(mod1) #age non significativa #r^2 0.3732
+white.test(mod1)
+dwtest(mod1) #non correlazione
+
+summary(mod2)
+anova(mod2) #age non significativa #r^2 0.4472
+white.test(mod2) #omoschedastici
+dwtest(mod2)# non correlazione
+
+plot(mod2,which=1,pch=19)
+plot(mod2,which=2,pch=19)
+plot(mod2,which=3,pch=19)
+plot(mod2,which=4,pch=19)
+abline(h=2*6/nrow(d),col=2,lwd=3,lty=2)
+plot(mod2,which=5,pch=19)
+
+
+hist(resid(mod2),col="lightblue",freq=F,xlab="Resid",main="")
+lines(density(resid(mod1)),col=2,lwd=2)
+pander(shapiro.test(resid(mod2)))
+pander(ols_vif_tol(mod3),big.mark=",")
+
+#errori omo, non correlati e normali
+```
+
+```{r}
+
+mod3 <- lm(RiskPropension ~ PortfolioHorizon + Age +  BondInvestments +  PortfolioRisk + EquityInvestments + AuM, dataset_portfolio)
+summary(mod3) #r^2 0.6646
+
+mod4 <- lm(RiskPropension ~ PortfolioHorizon + Age +  BondInvestments +  PortfolioRisk + EquityInvestments + AuM, d_noout)
+summary(mod4) #r^2 0.6885
+
+anova(mod4) #tutte significative
+white.test(mod4) #etero
+dwtest(mod4)# non correlazione
+
+mod5 <- lm(log(resid(mod4)^2) ~ PortfolioHorizon + Age +  BondInvestments +  PortfolioRisk + EquityInvestments + AuM, d_noout)
+sd_error <- sqrt(exp(fitted(mod5)))
+mod6 <- lm(I(RiskPropension/sd_error) ~ 0 + I(1/sd_error) + I(PortfolioHorizon/sd_error) + I(Age/sd_error) + I(BondInvestments/sd_error) + I(PortfolioRisk/sd_error) + I(EquityInvestments/sd_error) + I(AuM/sd_error), d_noout)
+
+white.test(mod6)
+dwtest(mod5)
+
+plot(mod6,which=1,pch=19)
+plot(mod6,which=2,pch=19)
+plot(mod6,which=3,pch=19)
+plot(mod6,which=4,pch=19)
+abline(h=2*6/nrow(d),col=2,lwd=3,lty=2)
+plot(mod6,which=5,pch=19)
+
+
+hist(resid(mod6),col="lightblue",freq=F,xlab="Resid",main="")
+lines(density(resid(mod1)),col=2,lwd=2)
+pander(shapiro.test(resid(mod6)))
+pander(ols_vif_tol(mod6),big.mark=",")
+```
+
+
+```{r}
+mod7 <- lm(RiskPropension ~  Cash + MoneyMarketInvestments + OtherInvestments + BondInvestments  +  Age + AuM , dataset_portfolio)
+summary(mod7) #0.6646
+anova(mod7)
+white.test(mod7)
+dwtest(mod7)#omoschedastici e incorrelati
+
+mod8 <- lm(RiskPropension ~  Cash + MoneyMarketInvestments + OtherInvestments + BondInvestments  +  Age + AuM , d_noout)
+summary(mod8)#0.6874
+anova(mod8)
+white.test(mod8)
+dwtest(mod8)#non correlati
+
+plot(mod8,which=1,pch=19)
+plot(mod8,which=2,pch=19)
+plot(mod8,which=3,pch=19)
+plot(mod8,which=4,pch=19)
+abline(h=2*6/nrow(d),col=2,lwd=3,lty=2)
+plot(mod8,which=5,pch=19)
+
+hist(resid(mod8),col="lightblue",freq=F,xlab="Resid",main="")
+lines(density(resid(mod1)),col=2,lwd=2)
+pander(shapiro.test(resid(mod8)))
+pander(ols_vif_tol(mod8),big.mark=",")
+```
+
+```{r}
+Fascia1<-subset(dataset_portfolio ,Age<20)
+summary(Fascia1)
+head(Fascia1)
+Fascia2<-subset(dataset_portfolio ,Age<30&Age>=20)
+summary(Fascia2)
+head(Fascia2)
+
+Fascia3<-subset(dataset_portfolio ,Age<45&Age>=30)
+summary(Fascia3)
+head(Fascia3)
+
+Fascia4<-subset(dataset_portfolio ,Age<60&Age>=45)
+summary(Fascia4)
+head(Fascia4)
+Fascia5<-subset(dataset_portfolio ,Age>=60)
+summary(Fascia5)
+Fascia5
+```
+
+```{r}
+mod1 <- lm(PortfolioRisk ~   BondInvestments + EquityInvestments + MoneyMarketInvestments + OtherInvestments + AuM+ Age ,Fascia1) #risk correlata a tutte variabili, cioè a un dna fin di questo tipo viene dato un prodotto di investimento composto dalle variabili (soprattutto qelle correlate)
+summary(mod1)
+anova(mod1)
+white.test(mod1)
+dwtest(mod1)
+
+plot(mod1,which=1,pch=19)
+plot(mod1,which=2,pch=19)
+plot(mod1,which=3,pch=19)
+plot(mod1,which=4,pch=19)
+abline(h=2*6/nrow(d),col=2,lwd=3,lty=2)
+plot(mod1,which=5,pch=19)
+
+hist(resid(mod2),col="lightblue",freq=F,xlab="Resid",main="")
+lines(density(resid(mod1)),col=2,lwd=2)
+pander(shapiro.test(resid(mod1)))
+pander(ols_vif_tol(mod1),big.mark=",")
+
+VAR_NUMERIC1 <- c("PortfolioRisk","BondInvestments","EquityInvestments","MoneyMarketInvestments","OtherInvestments", "Age", "AuM")
+cor(Fascia1[,VAR_NUMERIC1])
+#r^0.8269 molto buono
+#significative solo le prime due variabili(bond e equity)
+#correlazione buona tra PortfolioRisk e EquityInvestment
+```
+
+```{r}
+mod2 <- lm(PortfolioRisk ~  BondInvestments + EquityInvestments + MoneyMarketInvestments + OtherInvestments + AuM+ Age,Fascia2)
+summary(mod2)
+anova(mod2)
+white.test(mod2)
+dwtest(mod2)
+
+#r^0.466, significative bond e equity 
+plot(mod2,which=1,pch=19)
+plot(mod2,which=2,pch=19)
+plot(mod2,which=3,pch=19)
+plot(mod2,which=4,pch=19)
+abline(h=2*6/nrow(d),col=2,lwd=3,lty=2)
+plot(mod2,which=5,pch=19)
+
+hist(resid(mod2),col="lightblue",freq=F,xlab="Resid",main="")
+lines(density(resid(mod2)),col=2,lwd=2)
+pander(shapiro.test(resid(mod2)))
+pander(ols_vif_tol(mod2),big.mark=",")
+
+VAR_NUMERIC2 <- c("PortfolioRisk","BondInvestments","EquityInvestments","MoneyMarketInvestments","OtherInvestments", "Age", "AuM")
+cor(Fascia2[,VAR_NUMERIC1])
+#correlazione buona portfolioRisk e equity
+```
+```{r}
+mod3 <- lm(PortfolioRisk ~  BondInvestments + EquityInvestments  + MoneyMarketInvestments + OtherInvestments + AuM+ Age,Fascia3)
+summary(mod3)
+anova(mod3)
+white.test(mod3)
+dwtest(mod3)
+#r^0.3887 molto buono, significative solo Equity
+
+plot(mod3,which=1,pch=19)
+plot(mod3,which=2,pch=19)
+plot(mod3,which=3,pch=19)
+plot(mod3,which=4,pch=19)
+abline(h=2*6/nrow(d),col=2,lwd=3,lty=2)
+plot(mod3,which=5,pch=19)
+
+hist(resid(mod3),col="lightblue",freq=F,xlab="Resid",main="")
+lines(density(resid(mod3)),col=2,lwd=2)
+pander(shapiro.test(resid(mod3)))
+pander(ols_vif_tol(mod3),big.mark=",")
+
+VAR_NUMERIC3 <- c("PortfolioRisk","BondInvestments","EquityInvestments","MoneyMarketInvestments","OtherInvestments", "Age", "AuM")
+cor(Fascia3[,VAR_NUMERIC1])
+#equity e portfolio Risk abbastanza correlazione
+```
+
+```{r}
+mod4 <- lm(PortfolioRisk ~  BondInvestments + EquityInvestments + MoneyMarketInvestments + OtherInvestments + AuM + Age  ,Fascia4)
+summary(mod4)
+anova(mod4)
+white.test(mod4)
+dwtest(mod4)
+#r^0.5648 molto buono, significative bound equity aum
+
+plot(mod4,which=1,pch=19)
+plot(mod4,which=2,pch=19)
+plot(mod4,which=3,pch=19)
+plot(mod4,which=4,pch=19)
+abline(h=2*6/nrow(d),col=2,lwd=3,lty=2)
+plot(mod4,which=5,pch=19)
+
+hist(resid(mod4),col="lightblue",freq=F,xlab="Resid",main="")
+lines(density(resid(mod4)),col=2,lwd=2)
+pander(shapiro.test(resid(mod4)))
+pander(ols_vif_tol(mod4),big.mark=",")
+
+VAR_NUMERIC4 <- c("PortfolioRisk","BondInvestments","EquityInvestments","MoneyMarketInvestments","OtherInvestments", "Age", "AuM")
+cor(Fascia4[,VAR_NUMERIC1])
+#correlazione buona tra Portfolio risk e equity
+```
+
+```{r}
+mod5 <- lm(PortfolioRisk ~ BondInvestments + EquityInvestments + MoneyMarketInvestments + OtherInvestments + AuM+ Age,Fascia5)
+summary(mod5)
+anova(mod5)
+white.test(mod5)
+dwtest(mod5)
+
+#r^0.2902 molto buono, significative solo bond e equity
+plot(mod4,which=1,pch=19)
+plot(mod4,which=2,pch=19)
+plot(mod4,which=3,pch=19)
+plot(mod4,which=4,pch=19)
+abline(h=2*6/nrow(d),col=2,lwd=3,lty=2)
+plot(mod4,which=5,pch=19)
+
+
+hist(resid(mod5),col="lightblue",freq=F,xlab="Resid",main="")
+lines(density(resid(mod5)),col=2,lwd=2)
+pander(shapiro.test(resid(mod5)))
+pander(ols_vif_tol(mod5),big.mark=",")
+
+VAR_NUMERIC5 <- c("PortfolioRisk","BondInvestments","EquityInvestments","MoneyMarketInvestments","OtherInvestments", "Age", "AuM")
+cor(Fascia5[,VAR_NUMERIC1])
+#correlazione buona tra Portfolio risk e equity
+```
+
+```{r}
+mod6 <- lm(RiskPropension ~  Age +  BondInvestments +  PortfolioRisk + EquityInvestments + AuM , Fascia1)
+summary(mod6) #0.2743
+anova(mod6)
+white.test(mod6)
+dwtest(mod6)
+
+#r^0.2743 buono, significative solo age e bond
+plot(mod6,which=1,pch=19)
+plot(mod6,which=2,pch=19)
+plot(mod6,which=3,pch=19)
+plot(mod6,which=4,pch=19)
+abline(h=2*6/nrow(d),col=2,lwd=3,lty=2)
+plot(mod6,which=5,pch=19)
+
+hist(resid(mod6),col="lightblue",freq=F,xlab="Resid",main="")
+lines(density(resid(mod6)),col=2,lwd=2)
+pander(shapiro.test(resid(mod6)))
+pander(ols_vif_tol(mod6),big.mark=",")
+
+VAR_NUMERIC6 <- c("BondInvestments","EquityInvestments","RiskPropension", "Age", "AuM", "PortfolioRisk" )
+cor(Fascia1[,VAR_NUMERIC6])
+#correlazione tra equity e portfolio risk
+
+```
+
+
+```{r}
+mod7 <- lm(RiskPropension ~ PortfolioHorizon + Age +  BondInvestments +  PortfolioRisk + EquityInvestments + AuM, Fascia2)
+summary(mod7)
+anova(mod7)
+white.test(mod7)
+dwtest(mod7)
+
+#r^2 0.1649 molto buono, significative tutte tranne portfolioRisk
+plot(mod7,which=1,pch=19)
+plot(mod7,which=2,pch=19)
+plot(mod7,which=3,pch=19)
+plot(mod7,which=4,pch=19)
+abline(h=2*6/nrow(d),col=2,lwd=3,lty=2)
+plot(mod7,which=5,pch=19)
+
+hist(resid(mod7),col="lightblue",freq=F,xlab="Resid",main="")
+lines(density(resid(mod7)),col=2,lwd=2)
+pander(shapiro.test(resid(mod7)))
+pander(ols_vif_tol(mod7),big.mark=",")
+
+VAR_NUMERIC7 <- c("BondInvestments","EquityInvestments","RiskPropension", "Age", "AuM", "PortfolioRisk", "RiskPropension" )
+cor(Fascia2[,VAR_NUMERIC7])
+#correlazione tra equity e portfolio risk
+```
+
+```{r}
+mod8 <- lm(RiskPropension ~ PortfolioHorizon + Age +  BondInvestments +  PortfolioRisk + EquityInvestments + AuM, Fascia3)
+summary(mod8) #0.1931
+anova(mod8)
+white.test(mod8)
+dwtest(mod8)
+
+#r^2 0.1931  buono, significative tutte tranne portfolioHorizon e Bond
+
+plot(mod8,which=1,pch=19)
+plot(mod8,which=2,pch=19)
+plot(mod8,which=3,pch=19)
+plot(mod8,which=4,pch=19)
+abline(h=2*6/nrow(d),col=2,lwd=3,lty=2)
+plot(mod8,which=5,pch=19)
+
+hist(resid(mod8),col="lightblue",freq=F,xlab="Resid",main="")
+lines(density(resid(mod8)),col=2,lwd=2)
+pander(shapiro.test(resid(mod7)))
+pander(ols_vif_tol(mod8),big.mark=",")
+
+VAR_NUMERIC8 <- c("BondInvestments","EquityInvestments","RiskPropension", "Age", "AuM", "PortfolioRisk", "RiskPropension" )
+cor(Fascia3[,VAR_NUMERIC8])
+#correlazione tra equity e portfolio risk
+
+```
+
+```{r}
+mod9 <- lm(RiskPropension ~ PortfolioHorizon + Age +  BondInvestments +  PortfolioRisk + EquityInvestments + AuM, Fascia4)
+summary(mod9) #0.1688
+anova(mod9)
+white.test(mod9)
+dwtest(mod9)
+
+#r^2 0.1688 molto buono, significative tutte tranne portfolioHorizon Equity
+plot(mod9,which=1,pch=19)
+plot(mod9,which=2,pch=19)
+plot(mod9,which=3,pch=19)
+plot(mod9,which=4,pch=19)
+abline(h=2*6/nrow(d),col=2,lwd=3,lty=2)
+plot(mod9,which=5,pch=19)
+
+hist(resid(mod9),col="lightblue",freq=F,xlab="Resid",main="")
+lines(density(resid(mod9)),col=2,lwd=2)
+pander(shapiro.test(resid(mod9)))
+pander(ols_vif_tol(mod9),big.mark=",")
+
+VAR_NUMERIC9 <- c("BondInvestments","EquityInvestments","RiskPropension", "Age", "AuM", "PortfolioRisk", "RiskPropension" )
+cor(Fascia4[,VAR_NUMERIC9])
+#correlazione tra equity e portfolio risk
+```
+
+```{r}
+mod10 <- lm(RiskPropension ~ PortfolioHorizon + Age +  BondInvestments +  PortfolioRisk + EquityInvestments + AuM, Fascia5)
+summary(mod10) #0.2119
+anova(mod10)
+white.test(mod10)
+dwtest(mod10)
+
+#r^0.2119 molto buono, significative tutte tranne portfolioHorizon e equiti
+plot(mod10,which=1,pch=19)
+plot(mod10,which=2,pch=19)
+plot(mod10,which=3,pch=19)
+plot(mod10,which=4,pch=19)
+abline(h=2*6/nrow(d),col=2,lwd=3,lty=2)
+plot(mod10,which=5,pch=19)
+
+hist(resid(mod10),col="lightblue",freq=F,xlab="Resid",main="")
+lines(density(resid(mod10)),col=2,lwd=2)
+pander(shapiro.test(resid(mod10)))
+pander(ols_vif_tol(mod10),big.mark=",")
+
+VAR_NUMERIC10 <- c("BondInvestments","EquityInvestments","RiskPropension", "Age", "AuM", "PortfolioRisk", "RiskPropension" )
+cor(Fascia5[,VAR_NUMERIC10])
+#correlazione tra equity e portfolio risk
+```
+
+```{r}
+#pension need, income need long term care need, protection needd, inheritcaad need
+Bisogni1 <- subset(d,select= c(PensionNeed, IncomeNeed, LongTermCareNeed, ProtectionNeed, InheritanceIndex,Age))
+Bisogni1.0<- subset(Bisogni1,Age<20)
+
+Bisogni2<-subset(d,select= c(PensionNeed, IncomeNeed, LongTermCareNeed, ProtectionNeed, InheritanceIndex,Age))
+Bisogni2.0<-subset(Bisogni2,Age<30&Age>=20)
+               
+Bisogni3<-subset(d,select= c(PensionNeed, IncomeNeed, LongTermCareNeed, ProtectionNeed, InheritanceIndex,Age))
+Bisogni3.0<-subset(Bisogni3,Age<45&Age>=30)
+
+Bisogni4<-subset(d,select= c(PensionNeed, IncomeNeed, LongTermCareNeed, ProtectionNeed, InheritanceIndex,Age))
+Bisogni4.0<-subset(Bisogni4,Age<60&Age>=45)
+
+Bisogni5<-subset(d,select= c(PensionNeed, IncomeNeed, LongTermCareNeed, ProtectionNeed, InheritanceIndex,Age))
+Bisogni5.0<-subset(Bisogni5,Age>=60)
+```
+
+```{r}
+library(clValid)
+library(vegan)
+library(clustertend)
+library(cluster)
+library(factoextra)
+
+Bisogni1 <- subset(d,select= c(PensionNeed, IncomeNeed, LongTermCareNeed, ProtectionNeed, InheritanceIndex,Age))
+Bisogni1.0<- subset(Bisogni1,Age<20)
+Bisogni1.0_standard <- decostand(Bisogni1.0, "max",MARGIN=2)
+summary(Bisogni1.0)
+data.frame(cor(Bisogni1.0))
+plot(Bisogni1.0)
+
+fviz_nbclust(fascia1.0_standard, clara, method = "wss") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Elbow method") # numero ottiamle 6
+set.seed(123)
+fviz_nbclust(fascia1.0_standard, kmeans, nstart = 25, method = "gap_stat", nboot = 50)+
+labs(subtitle = "Gap statistic method") #numero ottimale 9
+
+fviz_nbclust(fascia1.0_standard, clara, method = "silhouette") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Silhouette") #numero ottimale 3
+
+clara.res <-clara(fascia1.0_standard, 3, metric = "manhattan", stand = FALSE,
+samples = 50, pamLike = FALSE)
+clara.res$medoids
+fviz_cluster(clara.res,palette =c("red","green","violet","yellow","black"),ellipse.type ="t", geom="point", pointsize = 1 ,ggtheme =theme_classic())
+
+test_datiinvestimenti_clusterizzati <- cbind(dati_investimenti_standard, cluster = clara.res$cluster, clienti = d$ClientID, etanormale = d$Age)
+head(test_datiinvestimenti_clusterizzati)
+table(d$Age, test_datiinvestimenti_clusterizzati$cluster)
+
+
+#NUMERO OTTIMALE DI CLUSTER 3
+#poichè il dataset è composto da 8 variabili, la rappresentazione su di un grafico bidimensionale è permessa grazie all'utilizzo delle PCA. Le due dimensione nel grafico indicano la quota massima di variabilità spiegata dalle variabile inserite per effetture la cluster analysis. 
+library(FactoMineR)
+library(corrplot)
+res.pca_dna <- PCA(dnafinanziario_standard, graph = FALSE)
+print(res.pca_dna)
+
+eig.val_dna<- get_eigenvalue(res.pca_dna)
+eig.val_dna #il grafico mostra la quota di variabilità spiegata per dimensione per ogni variabile. 
+
+#visualizzazione grafica della percentuale di variabilità del dataset spiegata da ogni dimensione  
+fviz_eig(res.pca_dna, addlabels = TRUE, ylim = c(0, 50))
+
+#correlazione tra una componente e la PC
+var_dna <- get_pca_var(res.pca_dna) 
+var_dna
+head(var_dna$coord) 
+
+#Andiamo a vedere la square cosine, square coordinates:
+#la qualità della rappresentazione delle variabili sul grafico è chiamato cos2: 
+#un elevato valore del cos2 indica una buona rappresentazione della variabile sulla componente principale.In questo caso la variabile è posizionata vicino alla circonferenza del cerchio della correllazione
+#un basso valore di cos2 indica che la variabile non è perfettamente rappresentata dalle PCA. In questo caso la varibile è vicina al centro del cerchio. Date le variabili, la somma del loro cos2 è uguale ad 1  
+var_dna$cos2 
+# dal comando possiamo vedere la varianza spiegata da ogni variabile per dimensione. Possiamo notare come le prime due dimensioni abbiano valori maggiori, Nella prima dimensione abbiamo un cos2 maggiore nelle variabili: Age, RiskPropension e ClientKnowledgeExperience mentre per la seconda dimensione: ClientPotentialIndex, IncomeHighLow e Age.   
+
+#vediamo ora graficamente: grafico 1) il contributo di ogni variabile. Grafico 2) la variabilità di ogni variabile sulla Dim.1 e Dim.2. Grafico 3) e 4) rappresentazione grafica del cos2 per ogni variabile 
+
+#grafico 1
+fviz_pca_var(res.pca_dna, col.var = "contrib",
+gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+)
+
+#grafico 2 
+fviz_cos2(res.pca_dna, choice = "var", axes = 1:2)
+
+#grafico 3
+fviz_pca_var(res.pca_dna, col.var = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), repel = TRUE)
+
+#grafico 4
+fviz_pca_var(res.pca_dna, alpha.var = "cos2")
+
+#dai grafici: Age,RiskPropension e ClientPotentialIndex vengono viste come le variabili che più contribuiscono alle PC, vengono inoltre rappresentare le correlaizoni positive e negative: RiskPropension, ClientInvestmentHorizon e Age sono posizionati in quadranti sepratai tra loro e diversi dalle variabili correlate positiviamente. 
+
+#Variables that are correlated with PC1 (i.e., Dim.1) and PC2 (i.e., Dim.2) are the most important in explaining the variability in the data set.
+#Variables that do not correlated with any PC or correlated with the last dimensions are variables with low contribution and might be removed to simplify the overall analysis.
+#The larger the value of the contribution, the more the variable contributes to the component.
+var_dna$contrib 
+#vediamo graficamente la variabilità spiegata da ogni variabile per ognuna delle dimensioni 
+corrplot(var_dna$contrib, is.corr=FALSE)
+
+# Contributions of variables to PC1
+fviz_contrib(res.pca_dna, choice = "var", axes = 1, top = 10)
+# Contributions of variables to PC2
+fviz_contrib(res.pca_dna, choice = "var", axes = 2, top = 10)
+#Per quanto contribuiscono in totale:
+fviz_contrib(res.pca_dna, choice = "var", axes = 1:2, top = 10)
+
+```
+
+```{r}
+Bisogni2<-subset(d,select= c(PensionNeed, IncomeNeed, LongTermCareNeed, ProtectionNeed, InheritanceIndex,Age))
+Bisogni2.0<-subset(Bisogni2,Age<30&Age>=20)
+
+Bisogni2.0_standard <- decostand(Bisogni2.0, "max",MARGIN=2)
+summary(Bisogni2.0)
+data.frame(cor(Bisogni2.0))
+plot(Bisogni2.0)
+
+fviz_nbclust(Bisogni2.0_standard, clara, method = "wss") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Elbow method") # numero ottiamle 5
+set.seed(123)
+fviz_nbclust(Bisogni2.0_standard, kmeans, nstart = 25, method = "gap_stat", nboot = 50)+
+labs(subtitle = "Gap statistic method") #numero ottimale 7
+
+fviz_nbclust(Bisogni2.0_standard, clara, method = "silhouette") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Silhouette") #numero ottimale 2
+
+clara.res <-clara(Bisogni2.0_standard, 3, metric = "manhattan", stand = FALSE,
+samples = 50, pamLike = FALSE)
+clara.res$medoids
+fviz_cluster(clara.res,palette =c("red","green","violet","yellow","black"),ellipse.type ="t", geom="point", pointsize = 1 ,ggtheme =theme_classic())
+
+test_Bisogni2.0_clusterizzati <- cbind(Bisogni2.0_standard, cluster = clara.res$cluster,  etanormale = Bisogni2.0$Age)
+head(test_Bisogni2.0_clusterizzati)
+table(Bisogni2.0$Age, test_Bisogni2.0_clusterizzati$cluster)
+
+#NUMERO OTTIMALE DI CLUSTER 3
+#poichè il dataset è composto da 8 variabili, la rappresentazione su di un grafico bidimensionale è permessa grazie all'utilizzo delle PCA. Le due dimensione nel grafico indicano la quota massima di variabilità spiegata dalle variabile inserite per effetture la cluster analysis. 
+library(FactoMineR)
+library(corrplot)
+res.pca_Bisogni2.0 <- PCA(Bisogni2.0_standard, graph = FALSE)
+print(res.pca_Bisogni2.0)
+
+eig.val_Bisogni2.0<- get_eigenvalue(res.pca_Bisogni2.0)
+eig.val_Bisogni2.0 #il grafico mostra la quota di variabilità spiegata per dimensione per ogni variabile. 
+
+#visualizzazione grafica della percentuale di variabilità del dataset spiegata da ogni dimensione  
+fviz_eig(res.pca_Bisogni2.0, addlabels = TRUE, ylim = c(0, 50))
+
+#correlazione tra una componente e la PC
+var_Bisogni2.0 <- get_pca_var(res.pca_Bisogni2.0) 
+var_Bisogni2.0
+head(var_Bisogni2.0$coord) 
+
+#Andiamo a vedere la square cosine, square coordinates:
+#la qualità della rappresentazione delle variabili sul grafico è chiamato cos2: 
+#un elevato valore del cos2 indica una buona rappresentazione della variabile sulla componente principale.In questo caso la variabile è posizionata vicino alla circonferenza del cerchio della correllazione
+#un basso valore di cos2 indica che la variabile non è perfettamente rappresentata dalle PCA. In questo caso la varibile è vicina al centro del cerchio. Date le variabili, la somma del loro cos2 è uguale ad 1  
+var_Bisogni2.0$cos2 
+# dal comando possiamo vedere la varianza spiegata da ogni variabile per dimensione. Possiamo notare come le prime due dimensioni abbiano valori maggiori, Nella prima dimensione abbiamo un cos2 maggiore nelle variabili: Age, RiskPropension e ClientKnowledgeExperience mentre per la seconda dimensione: ClientPotentialIndex, IncomeHighLow e Age.   
+
+#vediamo ora graficamente: grafico 1) il contributo di ogni variabile. Grafico 2) la variabilità di ogni variabile sulla Dim.1 e Dim.2. Grafico 3) e 4) rappresentazione grafica del cos2 per ogni variabile 
+
+#grafico 1
+fviz_pca_var(res.pca_dna, col.var = "contrib",
+gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+)
+
+#grafico 2 
+fviz_cos2(res.pca_dna, choice = "var", axes = 1:2)
+
+#grafico 3
+fviz_pca_var(res.pca_dna, col.var = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), repel = TRUE)
+
+#grafico 4
+fviz_pca_var(res.pca_dna, alpha.var = "cos2")
+
+#dai grafici: Age,RiskPropension e ClientPotentialIndex vengono viste come le variabili che più contribuiscono alle PC, vengono inoltre rappresentare le correlaizoni positive e negative: RiskPropension, ClientInvestmentHorizon e Age sono posizionati in quadranti sepratai tra loro e diversi dalle variabili correlate positiviamente. 
+
+#Variables that are correlated with PC1 (i.e., Dim.1) and PC2 (i.e., Dim.2) are the most important in explaining the variability in the data set.
+#Variables that do not correlated with any PC or correlated with the last dimensions are variables with low contribution and might be removed to simplify the overall analysis.
+#The larger the value of the contribution, the more the variable contributes to the component.
+var_Bisogni2.0$contrib 
+#vediamo graficamente la variabilità spiegata da ogni variabile per ognuna delle dimensioni 
+corrplot(var_Bisogni2.0$contrib, is.corr=FALSE)
+
+# Contributions of variables to PC1
+fviz_contrib(res.pca_dna, choice = "var", axes = 1, top = 10)
+# Contributions of variables to PC2
+fviz_contrib(res.pca_dna, choice = "var", axes = 2, top = 10)
+#Per quanto contribuiscono in totale:
+fviz_contrib(res.pca_dna, choice = "var", axes = 1:2, top = 10)              
+```
+
+
+
+
+
+
+```{r}
+Bisogni4<-subset(d,select= c(PensionNeed, IncomeNeed, LongTermCareNeed, ProtectionNeed, InheritanceIndex,Age))
+Bisogni4.0<-subset(Bisogni4,Age<60&Age>=45)
+
+Bisogni4.0_standard <- decostand(Bisogni4.0, "max",MARGIN=2)
+summary(Bisogni4.0)
+data.frame(cor(Bisogni4.0))
+plot(Bisogni4.0)
+
+fviz_nbclust(Bisogni4.0_standard, clara, method = "wss") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Elbow method") # numero ottiamle 7
+set.seed(123)
+fviz_nbclust(Bisogni4.0_standard, kmeans, nstart = 25, method = "gap_stat", nboot = 50)+
+labs(subtitle = "Gap statistic method") #numero ottimale 10
+
+fviz_nbclust(Bisogni4.0_standard, clara, method = "silhouette") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Silhouette") #numero ottimale 3
+
+clara.res <-clara(Bisogni4.0_standard, 7, metric = "manhattan", stand = FALSE,
+samples = 50, pamLike = FALSE)
+clara.res$medoids
+fviz_cluster(clara.res,palette =c("red","green","violet","yellow","black","pink","orange"),ellipse.type ="t", geom="point", pointsize = 1 ,ggtheme =theme_classic())
+
+test_Bisogni4.0_clusterizzati <- cbind(Bisogni4.0_standard, cluster = clara.res$cluster,  etanormale = Bisogni4.0$Age)
+head(test_Bisogni4.0_clusterizzati)
+table(Bisogni4.0$Age, test_Bisogni4.0_clusterizzati$cluster)
+
+#NUMERO OTTIMALE DI CLUSTER 3
+#poichè il dataset è composto da 8 variabili, la rappresentazione su di un grafico bidimensionale è permessa grazie all'utilizzo delle PCA. Le due dimensione nel grafico indicano la quota massima di variabilità spiegata dalle variabile inserite per effetture la cluster analysis. 
+library(FactoMineR)
+library(corrplot)
+res.pca_Bisogni4.0 <- PCA(Bisogni4.0_standard, graph = FALSE)
+print(res.pca_Bisogni4.0)
+
+eig.val_Bisogni4.0<- get_eigenvalue(res.pca_Bisogni4.0)
+eig.val_Bisogni4.0 #il grafico mostra la quota di variabilità spiegata per dimensione per ogni variabile. 
+
+#visualizzazione grafica della percentuale di variabilità del dataset spiegata da ogni dimensione  
+fviz_eig(res.pca_Bisogni4.0, addlabels = TRUE, ylim = c(0, 50))
+
+#correlazione tra una componente e la PC
+var_Bisogni4.0 <- get_pca_var(res.pca_Bisogni4.0) 
+var_Bisogni4.0
+head(var_Bisogni4.0$coord) 
+
+#Andiamo a vedere la square cosine, square coordinates:
+#la qualità della rappresentazione delle variabili sul grafico è chiamato cos2: 
+#un elevato valore del cos2 indica una buona rappresentazione della variabile sulla componente principale.In questo caso la variabile è posizionata vicino alla circonferenza del cerchio della correllazione
+#un basso valore di cos2 indica che la variabile non è perfettamente rappresentata dalle PCA. In questo caso la varibile è vicina al centro del cerchio. Date le variabili, la somma del loro cos2 è uguale ad 1  
+var_Bisogni4.0$cos2 
+# dal comando possiamo vedere la varianza spiegata da ogni variabile per dimensione. Possiamo notare come le prime due dimensioni abbiano valori maggiori, Nella prima dimensione abbiamo un cos2 maggiore nelle variabili: Age, RiskPropension e ClientKnowledgeExperience mentre per la seconda dimensione: ClientPotentialIndex, IncomeHighLow e Age.   
+
+#vediamo ora graficamente: grafico 1) il contributo di ogni variabile. Grafico 2) la variabilità di ogni variabile sulla Dim.1 e Dim.2. Grafico 3) e 4) rappresentazione grafica del cos2 per ogni variabile 
+
+#grafico 1
+fviz_pca_var(res.pca_Bisogni4.0, col.var = "contrib",
+gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+)
+
+#grafico 2 
+fviz_cos2(res.pca_Bisogni4.0, choice = "var", axes = 1:2)
+
+#grafico 3
+fviz_pca_var(res.pca_Bisogni4.0, col.var = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), repel = TRUE)
+
+#grafico 4
+fviz_pca_var(res.pca_Bisogni4.0, alpha.var = "cos2")
+
+#dai grafici: Age,RiskPropension e ClientPotentialIndex vengono viste come le variabili che più contribuiscono alle PC, vengono inoltre rappresentare le correlaizoni positive e negative: RiskPropension, ClientInvestmentHorizon e Age sono posizionati in quadranti sepratai tra loro e diversi dalle variabili correlate positiviamente. 
+#Variables that are correlated with PC1 (i.e., Dim.1) and PC2 (i.e., Dim.2) are the most important in explaining the variability in the data set.
+#Variables that do not correlated with any PC or correlated with the last dimensions are variables with low contribution and might be removed to simplify the overall analysis.
+#The larger the value of the contribution, the more the variable contributes to the component.
+var_Bisogni4.0$contrib 
+#vediamo graficamente la variabilità spiegata da ogni variabile per ognuna delle dimensioni 
+corrplot(var_Bisogni4.0$contrib, is.corr=FALSE)
+
+# Contributions of variables to PC1
+fviz_contrib(res.pca_Bisogni4.0, choice = "var", axes = 1, top = 10)
+# Contributions of variables to PC2
+fviz_contrib(res.pca_Bisogni4.0, choice = "var", axes = 2, top = 10)
+#Per quanto contribuiscono in totale:
+fviz_contrib(res.pca_Bisogni4.0, choice = "var", axes = 1:2, top = 10)              
+```
+
+```{r}
+Bisogni5<-subset(d,select= c(PensionNeed, IncomeNeed, LongTermCareNeed, ProtectionNeed, InheritanceIndex,Age))
+Bisogni5.0<-subset(Bisogni5,Age<60&Age>=45)
+
+Bisogni5.0_standard <- decostand(Bisogni5.0, "max",MARGIN=2)
+summary(Bisogni5.0)
+data.frame(cor(Bisogni5.0))
+plot(Bisogni5.0)
+
+fviz_nbclust(Bisogni5.0_standard, clara, method = "wss") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Elbow method") # numero ottiamle 7
+set.seed(123)
+fviz_nbclust(Bisogni5.0_standard, kmeans, nstart = 25, method = "gap_stat", nboot = 50)+
+labs(subtitle = "Gap statistic method") #numero ottimale 10
+
+fviz_nbclust(Bisogni5.0_standard, clara, method = "silhouette") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Silhouette") #numero ottimale 3
+
+clara.res <-clara(Bisogni5.0_standard, 3, metric = "manhattan", stand = FALSE,
+samples = 50, pamLike = FALSE)
+clara.res$medoids
+fviz_cluster(clara.res,palette =c("red","green","violet","yellow","black"),ellipse.type ="t", geom="point", pointsize = 1 ,ggtheme =theme_classic())
+
+test_Bisogni5.0_clusterizzati <- cbind(Bisogni5.0_standard, cluster = clara.res$cluster,  etanormale = Bisogni5.0$Age)
+head(test_Bisogni5.0_clusterizzati)
+table(Bisogni5.0$Age, test_Bisogni5.0_clusterizzati$cluster)
+
+#NUMERO OTTIMALE DI CLUSTER 3
+#poichè il dataset è composto da 8 variabili, la rappresentazione su di un grafico bidimensionale è permessa grazie all'utilizzo delle PCA. Le due dimensione nel grafico indicano la quota massima di variabilità spiegata dalle variabile inserite per effetture la cluster analysis. 
+res.pca_Bisogni5.0 <- PCA(Bisogni5.0_standard, graph = FALSE)
+print(res.pca_Bisogni5.0)
+
+eig.val_Bisogni5.0<- get_eigenvalue(res.pca_Bisogni5.0)
+eig.val_Bisogni5.0 #il grafico mostra la quota di variabilità spiegata per dimensione per ogni variabile. 
+
+#visualizzazione grafica della percentuale di variabilità del dataset spiegata da ogni dimensione  
+fviz_eig(res.pca_Bisogni5.0, addlabels = TRUE, ylim = c(0, 50))
+
+#correlazione tra una componente e la PC
+var_Bisogni5.0 <- get_pca_var(res.pca_Bisogni5.0) 
+var_Bisogni5.0
+head(var_Bisogni5.0$coord) 
+
+#Andiamo a vedere la square cosine, square coordinates:
+#la qualità della rappresentazione delle variabili sul grafico è chiamato cos2: 
+#un elevato valore del cos2 indica una buona rappresentazione della variabile sulla componente principale.In questo caso la variabile è posizionata vicino alla circonferenza del cerchio della correllazione
+#un basso valore di cos2 indica che la variabile non è perfettamente rappresentata dalle PCA. In questo caso la varibile è vicina al centro del cerchio. Date le variabili, la somma del loro cos2 è uguale ad 1  
+var_Bisogni5.0$cos2 
+# dal comando possiamo vedere la varianza spiegata da ogni variabile per dimensione. Possiamo notare come le prime due dimensioni abbiano valori maggiori, Nella prima dimensione abbiamo un cos2 maggiore nelle variabili: Age, RiskPropension e ClientKnowledgeExperience mentre per la seconda dimensione: ClientPotentialIndex, IncomeHighLow e Age.   
+
+#vediamo ora graficamente: grafico 1) il contributo di ogni variabile. Grafico 2) la variabilità di ogni variabile sulla Dim.1 e Dim.2. Grafico 3) e 4) rappresentazione grafica del cos2 per ogni variabile 
+
+#grafico 1
+fviz_pca_var(res.pca_Bisogni5.0, col.var = "contrib",
+gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+)
+
+#grafico 2 
+fviz_cos2(res.pca_Bisogni5.0, choice = "var", axes = 1:2)
+
+#grafico 3
+fviz_pca_var(res.pca_Bisogni5.0, col.var = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), repel = TRUE)
+
+#grafico 4
+fviz_pca_var(res.pca_Bisogni5.0, alpha.var = "cos2")
+
+#dai grafici: Age,RiskPropension e ClientPotentialIndex vengono viste come le variabili che più contribuiscono alle PC, vengono inoltre rappresentare le correlaizoni positive e negative: RiskPropension, ClientInvestmentHorizon e Age sono posizionati in quadranti sepratai tra loro e diversi dalle variabili correlate positiviamente. 
+#Variables that are correlated with PC1 (i.e., Dim.1) and PC2 (i.e., Dim.2) are the most important in explaining the variability in the data set.
+#Variables that do not correlated with any PC or correlated with the last dimensions are variables with low contribution and might be removed to simplify the overall analysis.
+#The larger the value of the contribution, the more the variable contributes to the component.
+var_Bisogni5.0$contrib 
+#vediamo graficamente la variabilità spiegata da ogni variabile per ognuna delle dimensioni 
+corrplot(var_Bisogni5.0$contrib, is.corr=FALSE)
+
+# Contributions of variables to PC1
+fviz_contrib(res.pca_Bisogni5.0, choice = "var", axes = 1, top = 10)
+# Contributions of variables to PC2
+fviz_contrib(res.pca_Bisogni5.0, choice = "var", axes = 2, top = 10)
+#Per quanto contribuiscono in totale:
+fviz_contrib(res.pca_Bisogni5.0, choice = "var", axes = 1:2, top = 10)              
+```
+
+```{r}
+#Andiamo ad osservare le correlazioni tra le variabili:
+plot(dataset_portfolio)
+data.frame(cor(dataset_portfolio))
+```
+
+```{r}
+library(cluster)
+library(clustertend)
+Dnafin1<-subset(d,select= c(Age, RiskPropension, PortfolioRisk, ClientInvestmentHorizon, PortfolioHorizon,ClientKnowledgeExperience,ClientPotentialIndex))
+Dnafin1.0<-subset(Dnafin1,Age<20)
+
+Dnafin1.0_standard <- decostand(Dnafin1.0, "max",MARGIN=2)
+summary(Dnafin1.0)
+data.frame(cor(Dnafin1.0))
+plot(Dnafin1.0)
+
+fviz_nbclust(Dnafin1.0_standard, clara, method = "wss") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Elbow method") # numero ottiamle 6
+set.seed(123)
+fviz_nbclust(Dnafin1.0_standard, kmeans, nstart = 25, method = "gap_stat", nboot = 50)+
+labs(subtitle = "Gap statistic method") #numero ottimale 9
+
+fviz_nbclust(Dnafin1.0_standard, clara, method = "silhouette") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Silhouette") #numero ottimale 3
+
+clara.res <-clara(Dnafin1.0_standard, 5, metric = "manhattan", stand = FALSE,
+samples = 50, pamLike = FALSE)
+clara.res$medoids
+fviz_cluster(clara.res,palette =c("red","green","violet","yellow","black"),ellipse.type ="t", geom="point", pointsize = 1 ,ggtheme =theme_classic())
+
+test_Dnafin1.0_clusterizzati <- cbind(Dnafin1.0_standard, cluster = clara.res$cluster,  etanormale = Dnafin1.0$Age)
+head(test_Dnafin1.0_clusterizzati)
+table(Dnafin1.0$Age, test_Dnafin1.0_clusterizzati$cluster)
+
+#NUMERO OTTIMALE DI CLUSTER 3
+#poichè il dataset è composto da 8 variabili, la rappresentazione su di un grafico bidimensionale è permessa grazie all'utilizzo delle PCA. Le due dimensione nel grafico indicano la quota massima di variabilità spiegata dalle variabile inserite per effetture la cluster analysis. 
+res.pca_Dnafin1.0 <- PCA(Dnafin1.0_standard, graph = FALSE)
+print(res.pca_Dnafin1.0)
+
+eig.val_Dnafin1.0<- get_eigenvalue(res.pca_Dnafin1.0)
+eig.val_Dnafin1.0 #il grafico mostra la quota di variabilità spiegata per dimensione per ogni variabile. 
+
+#visualizzazione grafica della percentuale di variabilità del dataset spiegata da ogni dimensione  
+fviz_eig(res.pca_Dnafin1.0, addlabels = TRUE, ylim = c(0, 50))
+
+#correlazione tra una componente e la PC
+var_Dnafin1.0 <- get_pca_var(res.pca_Dnafin1.0) 
+var_Dnafin1.0
+head(var_Dnafin1.0$coord) 
+
+#Andiamo a vedere la square cosine, square coordinates:
+#la qualità della rappresentazione delle variabili sul grafico è chiamato cos2: 
+#un elevato valore del cos2 indica una buona rappresentazione della variabile sulla componente principale.In questo caso la variabile è posizionata vicino alla circonferenza del cerchio della correllazione
+#un basso valore di cos2 indica che la variabile non è perfettamente rappresentata dalle PCA. In questo caso la varibile è vicina al centro del cerchio. Date le variabili, la somma del loro cos2 è uguale ad 1  
+var_Dnafin1.0$cos2 
+# dal comando possiamo vedere la varianza spiegata da ogni variabile per dimensione. Possiamo notare come le prime due dimensioni abbiano valori maggiori, Nella prima dimensione abbiamo un cos2 maggiore nelle variabili: Age, RiskPropension e ClientKnowledgeExperience mentre per la seconda dimensione: ClientPotentialIndex, IncomeHighLow e Age.   
+
+#vediamo ora graficamente: grafico 1) il contributo di ogni variabile. Grafico 2) la variabilità di ogni variabile sulla Dim.1 e Dim.2. Grafico 3) e 4) rappresentazione grafica del cos2 per ogni variabile 
+
+#grafico 1
+fviz_pca_var(res.pca_Dnafin1.0, col.var = "contrib",
+gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+)
+
+#grafico 2 
+fviz_cos2(res.pca_Dnafin1.0, choice = "var", axes = 1:2)
+
+#grafico 3
+fviz_pca_var(res.pca_Dnafin1.0, col.var = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), repel = TRUE)
+
+#grafico 4
+fviz_pca_var(res.pca_Dnafin1.0, alpha.var = "cos2")
+
+#dai grafici: Age,RiskPropension e ClientPotentialIndex vengono viste come le variabili che più contribuiscono alle PC, vengono inoltre rappresentare le correlaizoni positive e negative: RiskPropension, ClientInvestmentHorizon e Age sono posizionati in quadranti sepratai tra loro e diversi dalle variabili correlate positiviamente. 
+#Variables that are correlated with PC1 (i.e., Dim.1) and PC2 (i.e., Dim.2) are the most important in explaining the variability in the data set.
+#Variables that do not correlated with any PC or correlated with the last dimensions are variables with low contribution and might be removed to simplify the overall analysis.
+#The larger the value of the contribution, the more the variable contributes to the component.
+var_Dnafin1.0$contrib 
+#vediamo graficamente la variabilità spiegata da ogni variabile per ognuna delle dimensioni 
+corrplot(var_Dnafin1.0$contrib, is.corr=FALSE)
+
+# Contributions of variables to PC1
+fviz_contrib(res.pca_Dnafin1.0, choice = "var", axes = 1, top = 10)
+# Contributions of variables to PC2
+fviz_contrib(res.pca_Dnafin1.0, choice = "var", axes = 2, top = 10)
+#Per quanto contribuiscono in totale:
+fviz_contrib(res.pca_Dnafin1.0, choice = "var", axes = 1:2, top = 10)              
+```
+
+```{r}
+Dnafin2<-subset(d,select= c(Age, RiskPropension, PortfolioRisk, ClientInvestmentHorizon, PortfolioHorizon,ClientKnowledgeExperience,ClientPotentialIndex))
+Dnafin2.0<-subset(Dnafin2,Age<30&Age>=20)
+
+Dnafin2.0_standard <- decostand(Dnafin2.0, "max",MARGIN=2)
+summary(Dnafin2.0)
+data.frame(cor(Dnafin2.0))
+plot(Dnafin2.0)
+
+fviz_nbclust(Dnafin2.0_standard, clara, method = "wss") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Elbow method") # numero ottiamle 5
+set.seed(123)
+fviz_nbclust(Dnafin2.0_standard, kmeans, nstart = 25, method = "gap_stat", nboot = 50)+
+labs(subtitle = "Gap statistic method") #numero ottimale 5
+
+fviz_nbclust(Dnafin2.0_standard, clara, method = "silhouette") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Silhouette") #numero ottimale 3
+
+clara.res <-clara(Dnafin2.0_standard, 3, metric = "manhattan", stand = FALSE,
+samples = 50, pamLike = FALSE)
+clara.res$medoids
+fviz_cluster(clara.res,palette =c("red","green","violet","yellow","black"),ellipse.type ="t", geom="point", pointsize = 1 ,ggtheme =theme_classic())
+
+test_Dnafin2.0_clusterizzati <- cbind(Dnafin2.0_standard, cluster = clara.res$cluster,  etanormale = Dnafin2.0$Age)
+head(test_Dnafin2.0_clusterizzati)
+table(Dnafin2.0$Age, test_Dnafin2.0_clusterizzati$cluster)
+
+#NUMERO OTTIMALE DI CLUSTER 3
+#poichè il dataset è composto da 8 variabili, la rappresentazione su di un grafico bidimensionale è permessa grazie all'utilizzo delle PCA. Le due dimensione nel grafico indicano la quota massima di variabilità spiegata dalle variabile inserite per effetture la cluster analysis. 
+res.pca_Dnafin2.0 <- PCA(Dnafin2.0_standard, graph = FALSE)
+print(res.pca_Dnafin2.0)
+
+eig.val_Dnafin2.0<- get_eigenvalue(res.pca_Dnafin2.0)
+eig.val_Dnafin2.0 #il grafico mostra la quota di variabilità spiegata per dimensione per ogni variabile. 
+
+#visualizzazione grafica della percentuale di variabilità del dataset spiegata da ogni dimensione  
+fviz_eig(res.pca_Dnafin2.0, addlabels = TRUE, ylim = c(0, 50))
+
+#correlazione tra una componente e la PC
+var_Dnafin2.0 <- get_pca_var(res.pca_Dnafin2.0) 
+var_Dnafin2.0
+head(var_Dnafin2.0$coord) 
+
+#Andiamo a vedere la square cosine, square coordinates:
+#la qualità della rappresentazione delle variabili sul grafico è chiamato cos2: 
+#un elevato valore del cos2 indica una buona rappresentazione della variabile sulla componente principale.In questo caso la variabile è posizionata vicino alla circonferenza del cerchio della correllazione
+#un basso valore di cos2 indica che la variabile non è perfettamente rappresentata dalle PCA. In questo caso la varibile è vicina al centro del cerchio. Date le variabili, la somma del loro cos2 è uguale ad 1  
+var_Dnafin2.0$cos2 
+# dal comando possiamo vedere la varianza spiegata da ogni variabile per dimensione. Possiamo notare come le prime due dimensioni abbiano valori maggiori, Nella prima dimensione abbiamo un cos2 maggiore nelle variabili: Age, RiskPropension e ClientKnowledgeExperience mentre per la seconda dimensione: ClientPotentialIndex, IncomeHighLow e Age.   
+
+#vediamo ora graficamente: grafico 1) il contributo di ogni variabile. Grafico 2) la variabilità di ogni variabile sulla Dim.1 e Dim.2. Grafico 3) e 4) rappresentazione grafica del cos2 per ogni variabile 
+
+#grafico 1
+fviz_pca_var(res.pca_Dnafin2.0, col.var = "contrib",
+gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+)
+
+#grafico 2 
+fviz_cos2(res.pca_Dnafin2.0, choice = "var", axes = 1:2)
+
+#grafico 3
+fviz_pca_var(res.pca_Dnafin2.0, col.var = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), repel = TRUE)
+
+#grafico 4
+fviz_pca_var(res.pca_Dnafin2.0, alpha.var = "cos2")
+
+#dai grafici: Age,RiskPropension e ClientPotentialIndex vengono viste come le variabili che più contribuiscono alle PC, vengono inoltre rappresentare le correlaizoni positive e negative: RiskPropension, ClientInvestmentHorizon e Age sono posizionati in quadranti sepratai tra loro e diversi dalle variabili correlate positiviamente. 
+
+#Variables that are correlated with PC1 (i.e., Dim.1) and PC2 (i.e., Dim.2) are the most important in explaining the variability in the data set.
+#Variables that do not correlated with any PC or correlated with the last dimensions are variables with low contribution and might be removed to simplify the overall analysis.
+#The larger the value of the contribution, the more the variable contributes to the component.
+var_Dnafin2.0$contrib 
+#vediamo graficamente la variabilità spiegata da ogni variabile per ognuna delle dimensioni 
+corrplot(var_Dnafin2.0$contrib, is.corr=FALSE)
+
+# Contributions of variables to PC1
+fviz_contrib(res.pca_Dnafin2.0, choice = "var", axes = 1, top = 10)
+# Contributions of variables to PC2
+fviz_contrib(res.pca_Dnafin2.0, choice = "var", axes = 2, top = 10)
+#Per quanto contribuiscono in totale:
+fviz_contrib(res.pca_Dnafin2.0, choice = "var", axes = 1:2, top = 10)              
+```
+
+```{r}
+Dnafin5<-subset(d,select= c(Age, RiskPropension, PortfolioRisk, ClientInvestmentHorizon, PortfolioHorizon,ClientKnowledgeExperience,ClientPotentialIndex))
+Dnafin5.0<-subset(Dnafin5,Age>=60)
+
+Dnafin5.0_standard <- decostand(Dnafin5.0, "max",MARGIN=2)
+summary(Dnafin5.0)
+data.frame(cor(Dnafin5.0))
+plot(Dnafin5.0)
+
+fviz_nbclust(Dnafin5.0_standard, clara, method = "wss") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Elbow method") # numero ottiamle 6
+set.seed(123)
+fviz_nbclust(Dnafin5.0_standard, kmeans, nstart = 25, method = "gap_stat", nboot = 50)+
+labs(subtitle = "Gap statistic method") #numero ottimale 9
+
+fviz_nbclust(Dnafin5.0_standard, clara, method = "silhouette") +
+geom_vline(xintercept = 4, linetype = 2)+
+labs(subtitle = "Silhouette") #numero ottimale 3
+
+clara.res <-clara(Dnafin5.0_standard, 3, metric = "manhattan", stand = FALSE,
+samples = 50, pamLike = FALSE)
+clara.res$medoids
+fviz_cluster(clara.res,palette =c("red","green","violet","yellow","black"),ellipse.type ="t", geom="point", pointsize = 1 ,ggtheme =theme_classic())
+
+test_Dnafin5.0_clusterizzati <- cbind(Dnafin5.0_standard, cluster = clara.res$cluster,  etanormale = Dnafin5.0$Age)
+head(test_Dnafin5.0_clusterizzati)
+table(Dnafin5.0$Age, test_Dnafin5.0_clusterizzati$cluster)
+
+#NUMERO OTTIMALE DI CLUSTER 3
+#poichè il dataset è composto da 8 variabili, la rappresentazione su di un grafico bidimensionale è permessa grazie all'utilizzo delle PCA. Le due dimensione nel grafico indicano la quota massima di variabilità spiegata dalle variabile inserite per effetture la cluster analysis. 
+res.pca_Dnafin5.0 <- PCA(Dnafin5.0_standard, graph = FALSE)
+print(res.pca_Dnafin5.0)
+
+eig.val_Dnafin5.0<- get_eigenvalue(res.pca_Dnafin5.0)
+eig.val_Dnafin5.0 #il grafico mostra la quota di variabilità spiegata per dimensione per ogni variabile. 
+
+#visualizzazione grafica della percentuale di variabilità del dataset spiegata da ogni dimensione  
+fviz_eig(res.pca_Dnafin5.0, addlabels = TRUE, ylim = c(0, 50))
+
+#correlazione tra una componente e la PC
+var_Dnafin5.0 <- get_pca_var(res.pca_Dnafin5.0) 
+var_Dnafin5.0
+head(var_Dnafin5.0$coord) 
+
+#Andiamo a vedere la square cosine, square coordinates:
+#la qualità della rappresentazione delle variabili sul grafico è chiamato cos2: 
+#un elevato valore del cos2 indica una buona rappresentazione della variabile sulla componente principale.In questo caso la variabile è posizionata vicino alla circonferenza del cerchio della correllazione
+#un basso valore di cos2 indica che la variabile non è perfettamente rappresentata dalle PCA. In questo caso la varibile è vicina al centro del cerchio. Date le variabili, la somma del loro cos2 è uguale ad 1  
+var_Dnafin5.0$cos2 
+# dal comando possiamo vedere la varianza spiegata da ogni variabile per dimensione. Possiamo notare come le prime due dimensioni abbiano valori maggiori, Nella prima dimensione abbiamo un cos2 maggiore nelle variabili: Age, RiskPropension e ClientKnowledgeExperience mentre per la seconda dimensione: ClientPotentialIndex, IncomeHighLow e Age.   
+
+#vediamo ora graficamente: grafico 1) il contributo di ogni variabile. Grafico 2) la variabilità di ogni variabile sulla Dim.1 e Dim.2. Grafico 3) e 4) rappresentazione grafica del cos2 per ogni variabile 
+
+#grafico 1
+fviz_pca_var(res.pca_Dnafi5.0, col.var = "contrib",
+gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+)
+#grafico 2 
+fviz_cos2(res.pca_Dnafin5.0, choice = "var", axes = 1:2)
+
+#grafico 3
+fviz_pca_var(res.pca_Dnafin5.0, col.var = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), repel = TRUE)
+
+#grafico 4
+fviz_pca_var(res.pca_Dnafin5.0, alpha.var = "cos2")
+
+#dai grafici: Age,RiskPropension e ClientPotentialIndex vengono viste come le variabili che più contribuiscono alle PC, vengono inoltre rappresentare le correlaizoni positive e negative: RiskPropension, ClientInvestmentHorizon e Age sono posizionati in quadranti sepratai tra loro e diversi dalle variabili correlate positiviamente. 
+#Variables that are correlated with PC1 (i.e., Dim.1) and PC2 (i.e., Dim.2) are the most important in explaining the variability in the data set.
+#Variables that do not correlated with any PC or correlated with the last dimensions are variables with low contribution and might be removed to simplify the overall analysis.
+#The larger the value of the contribution, the more the variable contributes to the component.
+var_Dnafin5.0$contrib 
+#vediamo graficamente la variabilità spiegata da ogni variabile per ognuna delle dimensioni 
+corrplot(var_Dnafin5.0$contrib, is.corr=FALSE)
+
+# Contributions of variables to PC1
+fviz_contrib(res.pca_Dnafin5.0, choice = "var", axes = 1, top = 10)
+# Contributions of variables to PC2
+fviz_contrib(res.pca_Dnafin5.0, choice = "var", axes = 2, top = 10)
+#Per quanto contribuiscono in totale:
+fviz_contrib(res.pca_Dnafin5.0, choice = "var", axes = 1:2, top = 10)              
+```
