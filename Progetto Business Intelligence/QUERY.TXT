@@ -1,0 +1,541 @@
+#QUERY 1 NORMALIZZATA 
+SELECT COUNT(DISTINCT studenti.studente) AS numerostudenti,
+       iscrizioni.appcod,
+       ad.ad,
+       cds,
+       SUBSTR(appelli.dtappello, -4, 4) AS Annoappello,
+       appelli.dtappello
+  FROM appelli,
+       iscrizioni,
+       studenti,
+       cds,
+       ad
+ WHERE appelli.appcod = iscrizioni.appcod AND 
+       iscrizioni.studente = studenti.studente AND 
+       cds.cdscod = appelli.cdscod AND 
+       appelli.adcod = ad.adcod
+ GROUP BY Annoappello,
+          dtappello,
+          cds,
+          ad.ad,
+          iscrizioni.appcod
+ ORDER BY Annoappello ASC;
+
+
+#QUERY 1 DENORMALIZZATA 
+SELECT COUNT(DISTINCT studente) AS numerostudenti,
+       ad,
+       Cds,
+       '20' || SUBSTR(DtAppello, -2, 2) AS Annoappello,
+       DtAppello
+  FROM bos_denormalizzato
+ GROUP BY Annoappello,
+          dtappello,
+          Cds,
+          AD
+ ORDER BY Annoappello ASC;
+-- nella data appello viene messo lo zero prima del giorno e del mese e l'anno è espresso come '15 e non 2015 e inoltre manca l'attributo "appcod"
+
+#QUERY 2 NORMALIZZATA 
+SELECT ROUND( (superato / totiscritti) * 100, 2) AS tasso,
+       ad,
+       cds,
+       Annoappello
+  FROM (
+           SELECT ad,
+                  cds,
+                  appcod,
+                  CAST (superato AS DOUBLE) AS superato,
+                  CAST (totiscritti AS DOUBLE) AS totiscritti,
+                  Annoappello
+             FROM (
+                      SELECT appelli.appcod,
+                             ad.ad,
+                             cds.cds,
+                             count(DISTINCT studente) AS totiscritti,
+                             count(DISTINCT CASE superamento WHEN 1 THEN studente ELSE 0 END) AS superato,
+                             SUBSTR(appelli.dtappello, -4, 4) AS Annoappello
+                        FROM iscrizioni,
+                             appelli,
+                             ad,
+                             cds
+                       WHERE iscrizioni.appcod = appelli.appcod AND 
+                             cds.cdscod = appelli.cdscod AND 
+                             appelli.adcod = ad.adcod
+                       GROUP BY ad.ad,
+                                cds.cds,
+                                Annoappello
+                      HAVING superato < totiscritti
+                  )
+                  A
+            GROUP BY ad,
+                     cds,
+                     Annoappello
+       )
+       B
+ GROUP BY ad,
+          cds,
+          Annoappello
+ ORDER BY tasso ASC;
+ 
+-- assunto che anno accademico equivale all'anno solare, superato<totiscritti perchè dava Null che indicavano il fatto che un esame era stato superato ma il voto non registrato (oppure rilevazione errata)
+
+#QUERY  2 DENORMALIZZATA 
+SELECT ROUND( (superato / totiscritti) * 100, 3) AS tasso,
+       AD,
+       Cds, Annoappello
+
+  FROM (
+           SELECT AD,
+                  Cds,
+                  CAST (superato AS DOUBLE) AS superato,
+                  CAST (totiscritti AS DOUBLE) AS totiscritti, Annoappello
+             FROM (
+                      SELECT AD,
+                             Cds,
+                             count(DISTINCT Studente) AS totiscritti,
+                             count(DISTINCT CASE Superamento WHEN 1 THEN Studente ELSE 0 END) AS superato, '20'||SUBSTR(DtAppello , - 2, 2) AS Annoappello
+                        FROM bos_denormalizzato
+                       GROUP BY AD,
+                                Cds, Annoappello
+                      HAVING superato < totiscritti
+                  )
+                  A
+            GROUP BY 
+                     AD,
+                     Cds, Annoappello
+       )
+       B
+GROUP BY AD,
+          Cds, Annoappello
+ORDER BY tasso ASC;
+
+#QUERY 3 NORMALIZZATA 
+SELECT cds,
+       numeroesamidiversi,
+       conteggiocds,
+       numeroesamidiversi / conteggiocds AS tassocommitment
+  FROM (
+           SELECT cds,
+                  SUM(num_corsi_diversi) AS numeroesamidiversi,
+                  count(cds) AS conteggiocds 
+             FROM (
+                      SELECT CAST (num_corsi_diversi AS DOUBLE) AS num_corsi_diversi,
+                             cds
+                        FROM (
+                                 SELECT cds,
+                                        dtappello,
+                                        count(DISTINCT appelli.adcod) AS num_corsi_diversi
+                                   FROM appelli,
+                                        cds,
+                                        ad
+                                  WHERE appelli.adcod = ad.adcod AND 
+                                        cds.cdscod = appelli.cdscod
+                                  GROUP BY dtappello,
+                                           appelli.cdscod
+                             )
+                             A
+                  )
+            GROUP BY cds
+       )
+ GROUP BY cds
+ ORDER BY tassocommitment DESC
+ LIMIT 20;
+
+#QUERY 3 DENORMALIZZATA 
+SELECT Cds,
+       sommanumerocorsi,
+       conteggiocds,
+       sommanumerocorsi / conteggiocds AS tassocommitment
+  FROM (
+           SELECT CdS,
+                  SUM(num_corsi_diversi) AS sommanumerocorsi,
+                  count(CdS) AS conteggiocds
+             FROM (
+                      SELECT CAST (num_corsi_diversi AS DOUBLE) AS num_corsi_diversi,
+                             cds
+                        FROM (
+                                 SELECT CdS,
+                                        DtAppello,
+                                        count(DISTINCT AdCod) AS num_corsi_diversi
+                                   FROM bos_denormalizzato
+                                  GROUP BY DtAppello,
+                                           CdScod
+                             )
+                             A
+                  )
+            GROUP BY CdS
+       )
+ GROUP BY Cds
+ ORDER BY tassocommitment DESC
+ LIMIT 20;
+
+#QUERY 4 NORMALIZZATA 
+SELECT ad,
+       cds,
+       ROUND(mediavoto, 3) AS mediavoto, ROUND( (superato / totiscritti) * 100, 3) AS tassosuperamento
+  FROM (
+           SELECT ad,
+                  cds,
+                  voto,
+                  mediavoto,
+                  CAST (superato AS DOUBLE) AS superato,
+                  CAST (totiscritti AS DOUBLE) AS totiscritti
+             FROM (
+                      SELECT ad.ad,
+                             cds.cds,
+                             count(DISTINCT studente) AS totiscritti,
+                             count(DISTINCT CASE superamento WHEN 1 THEN studente ELSE 0 END) AS superato,
+                             voto,
+                             AVG(voto) AS mediavoto
+                        FROM iscrizioni,
+                             appelli,
+                             ad,
+                             cds
+                       WHERE iscrizioni.appcod = appelli.appcod AND 
+                             cds.cdscod = appelli.cdscod AND 
+                             appelli.adcod = ad.adcod
+                       GROUP BY ad.ad,
+                                cds.cds
+                      HAVING superato < totiscritti
+                  )
+                  A
+            GROUP BY ad,
+                     cds
+       )
+       B
+ WHERE mediavoto IS NOT NULL
+ GROUP BY ad,
+          cds,
+          tassosuperamento
+ ORDER BY cds, mediavoto ASC;
+
+
+#QUERY 4 DENORMALIZZATA 
+SELECT AD,
+       Cds,
+       mediavoto,
+       ROUND( (superato / totiscritti) * 100, 3) AS tassosuperamento
+  FROM (
+           SELECT AD,
+                  Cds,
+                  Voto,
+                  mediavoto,
+                  CAST (superato AS DOUBLE) AS superato,
+                  CAST (totiscritti AS DOUBLE) AS totiscritti
+             FROM (
+                      SELECT AD,
+                             Cds,
+                             count(DISTINCT Studente) AS totiscritti,
+                             count(DISTINCT CASE Superamento WHEN 1 THEN Studente ELSE 0 END) AS superato,
+                             Voto,
+                             AVG(Voto) AS mediavoto
+                        FROM bos_denormalizzato
+                       GROUP BY AD,
+                                Cds
+                      HAVING superato < totiscritti
+                  )
+            GROUP BY AD,
+                     Cds
+       )
+ WHERE mediavoto IS NOT NULL
+ GROUP BY AD,
+          Cds,
+          tassosuperamento
+ ORDER BY cds,
+          mediavoto ASC;
+
+
+#QUERY 5 NORMALIZZATA 
+SELECT count(DISTINCT studente) AS numerostudenti,
+       cds,
+       ROUND(rapporto, 2) AS fastandfurious,
+       ROUND(mediavoto, 4) AS mediavoto,
+       differenzagiorni
+  FROM (
+           SELECT cds,
+                  studente,
+                  esamisostenuti,
+                  mediavoto / (differenzagiorni) AS rapporto,
+                  differenzagiorni,
+                  mediavoto
+             FROM (
+                      SELECT CAST ( (JulianDay(maxdata) - JulianDay(mindata) ) AS INTEGER) AS differenzagiorni,
+                             cds,
+                             studente,
+                             esamisostenuti,
+                             mediavoto
+                        FROM (
+                                 SELECT max(data_mod) AS maxdata,
+                                        min(data_mod) AS mindata,
+                                        avg(voto) AS mediavoto,
+                                        cds,
+                                        studente,
+                                        count( * ) AS esamisostenuti
+                                   FROM (
+                                            SELECT anno || '-' || mese_mod || '-' || giorno_mod AS data_mod,
+                                                   studente,
+                                                   cds,
+                                                   voto
+                                              FROM (
+                                                       SELECT CASE length(mese) WHEN 1 THEN '0' || mese ELSE mese END AS mese_mod,
+                                                              CASE length(giorno) WHEN 1 THEN '0' || giorno ELSE giorno END AS giorno_mod,
+                                                              SUBSTR(dtappello, length(dtappello) - 3, 4) AS anno,
+                                                              studente,
+                                                              cds,
+                                                              voto
+                                                         FROM (
+                                                                  SELECT studente,
+                                                                         cds,
+                                                                         voto,
+                                                                         dtappello,
+                                                                         substr(resto, instr(resto, '/'), -2) AS mese,
+                                                                         SUBSTR(dtappello, -2, 2) AS anno,
+                                                                         SUBSTR(dtappello, instr(dtappello, '/'), -2) AS giorno
+                                                                    FROM (
+                                                                             SELECT studente,
+                                                                                    cds,
+                                                                                    voto,
+                                                                                    dtappello,
+                                                                                    substr(dtappello, instr(dtappello, '/') + 1) AS resto,
+                                                                                    SUBSTR(dtappello, -4, 4) AS anno,
+                                                                                    SUBSTR(dtappello, instr(dtappello, '/'), -2) AS giorno
+                                                                               FROM (
+                                                                                        SELECT studente,
+                                                                                               cds,
+                                                                                               voto,
+                                                                                               dtappello,
+                                                                                               SUBSTR(appelli.dtappello, -4, 4) AS anno,
+                                                                                               SUBSTR(dtappello, instr(dtappello, '/'), -2) AS giorno
+                                                                                          FROM iscrizioni,
+                                                                                               appelli,
+                                                                                               cds
+                                                                                         WHERE appelli.appcod = iscrizioni.appcod AND 
+                                                                                               appelli.cdscod = cds.cdscod
+                                                                                    )
+                                                                                    A
+                                                                         )
+                                                                         B
+                                                              )
+                                                              C
+                                                   )
+                                                   D
+                                        )
+                                        E
+                                  WHERE Voto IS NOT NULL
+                                  GROUP BY studente,
+                                           cds
+                                 HAVING esamisostenuti > 1
+                             )
+                             F
+                       WHERE differenzagiorni > 0
+                       GROUP BY studente,
+                                cds
+                  )
+                  G
+       )
+ GROUP BY cds,
+          fastandfurious
+ ORDER BY cds,
+          fastandfurious DESC;-- differenza giorni >0 perchè ci sono differenze date che vengono zero producendo un valore NULL
+
+#QUERY 5 DENORMALIZZATA 
+SELECT count(DISTINCT studente) AS numerostudenti,
+       Cds,
+       mediavoto,
+       ROUND(mediavoto / differenzagiorni, 2) AS fastandfurious,
+       differenzagiorni
+  FROM (
+           SELECT julianDay(maxdata) - julianDay(mindata) AS differenzagiorni,
+                  Cds,
+                  Studente,
+                  esamisostenuti,
+                  mediavoto
+             FROM (
+                      SELECT max(data_mod) AS maxdata,
+                             min(data_mod) AS mindata,
+                             avg(Voto) AS mediavoto,
+                             Cds,
+                             Studente,
+                             count( * ) AS esamisostenuti
+                        FROM (
+                                 SELECT anno || '-' || mese || '-' || giorno AS data_mod,
+                                        Studente,
+                                        Cds,
+                                        Voto
+                                   FROM (
+                                            SELECT giorno,
+                                                   mese,
+                                                   anno,
+                                                   Studente,
+                                                   Cds,
+                                                   Voto
+                                              FROM (
+                                                       SELECT Studente,
+                                                              Cds,
+                                                              Voto,
+                                                              Dtappello,
+                                                              substr(resto, instr(resto, '/'), -2) AS mese,
+                                                              anno,
+                                                              giorno
+                                                         FROM (
+                                                                  SELECT Studente,
+                                                                         Cds,
+                                                                         Voto,
+                                                                         Dtappello,
+                                                                         substr(dtappello, instr(dtappello, '/') + 1) AS resto,
+                                                                         anno,
+                                                                         giorno
+                                                                    FROM (
+                                                                             SELECT Studente,
+                                                                                    Cds,
+                                                                                    Voto,
+                                                                                    Dtappello,
+                                                                                    '20' || SUBSTR(Dtappello, length(Dtappello) - 1, 2) AS anno,
+                                                                                    SUBSTR(dtappello, instr(dtappello, '/'), -2) AS giorno
+                                                                               FROM bos_denormalizzato
+                                                                         )
+                                                              )
+                                                   )
+                                        )
+                             )
+                       WHERE Voto IS NOT NULL
+                       GROUP BY Studente
+                      HAVING esamisostenuti > 1
+                  )
+       )
+ GROUP BY Cds,
+          fastandfurious
+ ORDER BY cds,
+          fastandfurious DESC;
+
+#QUERY 6 NORMALIZZATA 
+SELECT A.ad,
+       cds, ROUND(avg(A.numerodibocciature),3) AS mediabocciature, numerototaliappelli
+  FROM (
+           SELECT iscrizioni.studente, ad,
+                  cds,
+                  count(iscrizioni.iscrizione) AS numerodibocciature, count(appelli.appcod) as numerototaliappelli
+             FROM iscrizioni,
+                  appelli,
+                  cds,
+                  ad
+            WHERE iscrizioni.appcod = appelli.appcod AND 
+                  cds.cdscod = appelli.cdscod AND 
+                  ad.adcod = appelli.adcod AND insufficienza = '1'
+            GROUP BY studente,
+                     ad,
+                     cds
+       )
+       A
+ GROUP BY A.ad,
+          A.cds
+ ORDER BY mediabocciature DESC;
+
+ -- la media di volte che uno studente si iscrive all'appello di un certo corso di studi e che è insufficiente
+
+#QUERY 6 DENORMALIZZATA 
+SELECT A.AD,
+   CdS, ROUND(avg(A.numerodibocciature),3) AS mediabocciature
+  FROM (
+           SELECT studente, AD,
+                  CdS,
+                  count(iscrizione) AS numerodibocciature
+             FROM bos_denormalizzato
+            WHERE  insufficienza = '1'
+            GROUP BY studente,
+                     AD,
+                     CdS
+       )
+       A
+ GROUP BY A.AD,
+          A.CdS
+ ORDER BY mediabocciature DESC;
+
+ -- la media di volte che uno studente si iscrive all'appello di un certo corso di studi e che è insufficiente
+
+
+#QUERY 7 NORMALIZZATA 
+SELECT studentiuomini,
+       studentidonne,
+       differenzastudentiassenti,
+       ( (differenzastudentiassenti * 100) / studentiuomini) AS percentualediff,
+       cds,
+       resarea
+  FROM (
+           SELECT studentiuomini,
+                  studentidonne,
+                  (studentiuomini - studentidonne) AS differenzastudentiassenti,
+                  cds,
+                  resarea
+             FROM (
+                      SELECT studentidonne,
+                             studentiuomini,
+                             cds,
+                             resarea
+                        FROM (
+                                 SELECT cds,
+                                        resarea,
+                                        genere,
+                                        count(DISTINCT CASE studenti.genere WHEN 'F' THEN studenti.studente ELSE 'M' END) AS studentidonne,
+                                        count(DISTINCT CASE studenti.genere WHEN 'M' THEN studenti.studente ELSE 'F' END) AS studentiuomini,
+                                        assenza
+                                   FROM studenti,
+                                        iscrizioni,
+                                        appelli,
+                                        cds
+                                  WHERE studenti.studente = iscrizioni.studente AND 
+                                        iscrizioni.appcod = appelli.appcod AND 
+                                        appelli.cdscod = cds.cdscod AND 
+                                        assenza = '1'
+                                  GROUP BY cds,
+                                           resarea
+                             )
+                             A
+                       GROUP BY cds,
+                                resarea
+                      HAVING studentidonne < studentiuomini
+                  )
+       )
+ GROUP BY cds,
+          resarea;
+-- [STUDENTESSE MODELLO] Trovare il numero di donne che hanno fatto meno assenze dei colleghi uomini, per ogni corso di studi studi e per tipologia di residenza"
+
+#QUERY 7 DENORMALIZZATA 
+SELECT studentiuomini,
+       studentidonne,
+       differenzastudentiassenti,
+       ( (differenzastudentiassenti * 100) / studentiuomini) AS differenzapercentuale,
+       Cds,
+       StuResArea
+  FROM (
+           SELECT studentiuomini,
+                  studentidonne,
+                  (studentiuomini - studentidonne) AS differenzastudentiassenti,
+                  Cds,
+                  StuResArea
+             FROM (
+                      SELECT studentidonne,
+                             studentiuomini,
+                             Cds,
+                             StuResArea
+                        FROM (
+                                 SELECT Cds,
+                                        StuResArea,
+                                        StuGen,
+                                        count(DISTINCT CASE StuGen WHEN 'F' THEN Studente ELSE 'M' END) AS studentidonne,
+                                        count(DISTINCT CASE StuGen WHEN 'M' THEN Studente ELSE 'F' END) AS studentiuomini,
+                                        Assenza
+                                   FROM bos_denormalizzato
+                                  WHERE Assenza = '1'
+                                  GROUP BY Cds,
+                                           StuResArea
+                             )
+                             A
+                       GROUP BY Cds,
+                                StuResArea
+                      HAVING studentidonne < studentiuomini
+                  )
+       )
+ GROUP BY Cds,
+          StuResArea;
